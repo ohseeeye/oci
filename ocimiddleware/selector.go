@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ocifilter
+package ocimiddleware
 
 import (
 	"context"
 	"io"
 	"iter"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // Selector returns a registry that delegates each operation to the registry
@@ -37,20 +37,20 @@ import (
 //
 // Selector does not validate selectRegistry. It panics when an operation is
 // attempted if selectRegistry is nil or returns a nil registry.
-func Selector(selectRegistry func(repo string) oci.Interface) oci.Interface {
+func Selector(selectRegistry func(repo string) oci.Registry) oci.Registry {
 	return &selectorRegistry{
 		selectRegistry: selectRegistry,
 	}
 }
 
 type selectorRegistry struct {
-	// Embed Funcs so that methods added to oci.Interface in the future default
+	// Embed Funcs so that methods added to oci.Registry in the future default
 	// to ErrUnsupported until routing semantics are explicitly implemented.
 	*oci.Funcs
-	selectRegistry func(repo string) oci.Interface
+	selectRegistry func(repo string) oci.Registry
 }
 
-var _ oci.Interface = (*selectorRegistry)(nil)
+var _ oci.Registry = (*selectorRegistry)(nil)
 
 func (r *selectorRegistry) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {
 	return r.selectRegistry(repo).GetBlob(ctx, repo, digest)

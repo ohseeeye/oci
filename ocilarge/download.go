@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 // Tuning constants for the adaptive parallel download pipeline.
@@ -58,7 +58,7 @@ const (
 //  4. Launches a pipeline of concurrent fetchers that prefetch chunks into
 //     an ordered cache so the next chunks are always ready when the caller
 //     reads.
-func DownloadLargeBlob(ctx context.Context, reg oci.Interface, repo string, dgst oci.Digest) (oci.BlobReader, error) {
+func DownloadLargeBlob(ctx context.Context, reg oci.Registry, repo string, dgst oci.Digest) (oci.BlobReader, error) {
 	desc, err := reg.ResolveBlob(ctx, repo, dgst)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve blob: %w", err)
@@ -118,7 +118,7 @@ func deriveChunkSize(probeBytes int64, elapsed time.Duration) int64 {
 // duration of the transfer (excluding connection setup overhead as much as
 // possible by timing from first byte read to completion, but in practice we
 // time the whole call for simplicity).
-func timedRangeGet(ctx context.Context, reg oci.Interface, repo string, dgst oci.Digest, start, end int64) ([]byte, time.Duration, error) {
+func timedRangeGet(ctx context.Context, reg oci.Registry, repo string, dgst oci.Digest, start, end int64) ([]byte, time.Duration, error) {
 	t0 := time.Now()
 	data, err := fetchRange(ctx, reg, repo, dgst, start, end)
 	return data, time.Since(t0), err
@@ -126,7 +126,7 @@ func timedRangeGet(ctx context.Context, reg oci.Interface, repo string, dgst oci
 
 // fetchRange downloads [start, end) from the registry with up to maxRetries
 // attempts. It returns the raw bytes.
-func fetchRange(ctx context.Context, reg oci.Interface, repo string, dgst oci.Digest, start, end int64) ([]byte, error) {
+func fetchRange(ctx context.Context, reg oci.Registry, repo string, dgst oci.Digest, start, end int64) ([]byte, error) {
 	size := end - start
 	var lastErr error
 	for range maxRetries {
@@ -175,7 +175,7 @@ type chunkResult struct {
 // (and freed) as soon as possible.
 func runPipeline(
 	ctx context.Context,
-	reg oci.Interface,
+	reg oci.Registry,
 	repo string,
 	dgst oci.Digest,
 	totalSize int64,
@@ -296,7 +296,7 @@ func runPipeline(
 }
 
 // downloadSingle handles small blobs that fit in a single request.
-func downloadSingle(ctx context.Context, reg oci.Interface, repo string, dgst oci.Digest, desc oci.Descriptor) (oci.BlobReader, error) {
+func downloadSingle(ctx context.Context, reg oci.Registry, repo string, dgst oci.Digest, desc oci.Descriptor) (oci.BlobReader, error) {
 	data, err := fetchRange(ctx, reg, repo, dgst, 0, desc.Size)
 	if err != nil {
 		return nil, err

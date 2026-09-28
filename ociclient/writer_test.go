@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociauth"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ociauth"
 	"github.com/stretchr/testify/require"
 )
 

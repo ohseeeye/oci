@@ -27,9 +27,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociclient"
-	digest "github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/ociclient"
+	digest "github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/rogpeppe/retry"
 )
@@ -125,7 +125,7 @@ var waitStrategy = retry.Strategy{
 	MaxDuration: 500 * time.Millisecond,
 }
 
-func connect(ts *testscript.TestScript) (oci.Interface, error) {
+func connect(ts *testscript.TestScript) (oci.Registry, error) {
 	addrFile := ts.Getenv("ADDR_FILE")
 	if addrFile == "" {
 		return nil, fmt.Errorf("$ADDR_FILE not set")

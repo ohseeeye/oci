@@ -1,4 +1,4 @@
-module github.com/docker/oci
+module github.com/ohseeeye/oci
 
 go 1.25.0
 

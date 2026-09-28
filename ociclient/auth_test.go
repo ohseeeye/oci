@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociauth"
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ocimem"
-	"github.com/docker/oci/ociserver"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/ocimem"
+	"github.com/ohseeeye/oci/ociserver"
+	"github.com/ohseeeye/oci/pkg/ociauth"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,39 +31,39 @@ func TestAuthScopes(t *testing.T) {
 	defer srv.Close()
 	srvURL, _ := url.Parse(srv.URL)
 
-	assertScope := func(scope string, f func(ctx context.Context, r oci.Interface)) {
+	assertScope := func(scope string, f func(ctx context.Context, r oci.Registry)) {
 		assertAuthScope(t, srvURL.Host, scope, f)
 	}
 
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		r.GetBlob(ctx, "foo/bar", testDigest)
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		r.GetBlobRange(ctx, "foo/bar", testDigest, 100, 200)
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		r.GetManifest(ctx, "foo/bar", testDigest)
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		r.GetTag(ctx, "foo/bar", "sometag")
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		r.ResolveBlob(ctx, "foo/bar", testDigest)
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		r.ResolveManifest(ctx, "foo/bar", testDigest)
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		r.ResolveTag(ctx, "foo/bar", "sometag")
 	})
-	assertScope("repository:foo/bar:pull,push", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull,push", func(ctx context.Context, r oci.Registry) {
 		r.PushBlob(ctx, "foo/bar", oci.Descriptor{
 			MediaType: "application/json",
 			Digest:    testDigest,
 			Size:      3,
 		}, strings.NewReader("foo"))
 	})
-	assertScope("repository:foo/bar:pull,push", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull,push", func(ctx context.Context, r oci.Registry) {
 		w, err := r.PushBlobChunked(ctx, "foo/bar", 0)
 		require.NoError(t, err)
 		w.Write([]byte("foo"))
@@ -76,37 +76,37 @@ func TestAuthScopes(t *testing.T) {
 		_, err = w.Commit(ocidigest.FromBytes([]byte("foobar")))
 		require.NoError(t, err)
 	})
-	assertScope("repository:x/y:pull repository:z/w:pull,push", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:x/y:pull repository:z/w:pull,push", func(ctx context.Context, r oci.Registry) {
 		r.MountBlob(ctx, "x/y", "z/w", testDigest)
 	})
-	assertScope("repository:foo/bar:pull,push", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull,push", func(ctx context.Context, r oci.Registry) {
 		r.PushManifest(ctx, "foo/bar", []byte("something"), "application/json", &oci.PushManifestParameters{
 			Tags: []string{"sometag"},
 		})
 	})
-	assertScope("repository:foo/bar:delete", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:delete", func(ctx context.Context, r oci.Registry) {
 		r.DeleteBlob(ctx, "foo/bar", testDigest)
 	})
-	assertScope("repository:foo/bar:delete", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:delete", func(ctx context.Context, r oci.Registry) {
 		r.DeleteManifest(ctx, "foo/bar", testDigest)
 	})
-	assertScope("repository:foo/bar:delete", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:delete", func(ctx context.Context, r oci.Registry) {
 		r.DeleteTag(ctx, "foo/bar", "sometag")
 	})
-	assertScope("registry:catalog:*", func(ctx context.Context, r oci.Interface) {
+	assertScope("registry:catalog:*", func(ctx context.Context, r oci.Registry) {
 		oci.All(r.Repositories(ctx, ""))
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		oci.All(r.Tags(ctx, "foo/bar", nil))
 	})
-	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Interface) {
+	assertScope("repository:foo/bar:pull", func(ctx context.Context, r oci.Registry) {
 		oci.All(r.Referrers(ctx, "foo/bar", testDigest, nil))
 	})
 }
 
 // assertAuthScope asserts that the given function makes a client request with the
 // given scope to the given URL.
-func assertAuthScope(t *testing.T, host string, scope string, f func(ctx context.Context, r oci.Interface)) {
+func assertAuthScope(t *testing.T, host string, scope string, f func(ctx context.Context, r oci.Registry)) {
 	requestedScopes := make(map[string]bool)
 
 	// Check that the context is passed through with values intact.

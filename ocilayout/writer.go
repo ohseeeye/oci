@@ -21,9 +21,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // PushBlob pushes a blob described by desc to the given repository.

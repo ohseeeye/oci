@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 const defaultUploadChunkSize = 100 * 1024 * 1024 // 100 MB
@@ -23,7 +23,7 @@ type UploadLargeBlobParameters struct {
 }
 
 // UploadLargeBlob uploads a large blob in chunks with retries so that uploads can be resumed in case of network error
-func UploadLargeBlob(ctx context.Context, reg oci.Interface, repo string, f io.ReadCloser, params *UploadLargeBlobParameters) (oci.Descriptor, error) {
+func UploadLargeBlob(ctx context.Context, reg oci.Registry, repo string, f io.ReadCloser, params *UploadLargeBlobParameters) (oci.Descriptor, error) {
 	defer f.Close()
 	chunkSize := defaultUploadChunkSize
 	algorithm := ocidigest.Canonical

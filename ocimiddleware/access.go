@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ocifilter
+package ocimiddleware
 
 import (
 	"context"
 	"io"
 	"iter"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // AccessKind represents the type of access being performed on a registry.
@@ -50,7 +50,7 @@ const (
 //
 // When invoking the Repositories method, check is invoked for each repository in
 // the iteration - the repository will be omitted if check returns an error.
-func AccessChecker(r oci.Interface, check func(repoName string, access AccessKind) error) oci.Interface {
+func AccessChecker(r oci.Registry, check func(repoName string, access AccessKind) error) oci.Registry {
 	return &accessCheckerRegistry{
 		check: check,
 		r:     r,
@@ -59,31 +59,11 @@ func AccessChecker(r oci.Interface, check func(repoName string, access AccessKin
 
 type accessCheckerRegistry struct {
 	// Embed Funcs rather than the interface directly so that
-	// if new methods are added and selectRegistry isn't updated,
+	// if new methods are added and accessCheckerRegistry isn't updated,
 	// we fall back to returning an error rather than passing through the method.
 	*oci.Funcs
 	check func(repoName string, kind AccessKind) error
-	r     oci.Interface
-}
-
-// Select returns a wrapper for r that provides only
-// repositories for which allow returns true.
-//
-// Requests for disallowed repositories will return ErrNameUnknown
-// errors on read and ErrDenied on write.
-func Select(r oci.Interface, allow func(repoName string) bool) oci.Interface {
-	return AccessChecker(r, func(repoName string, access AccessKind) error {
-		if allow(repoName) {
-			return nil
-		}
-		if access == AccessWrite {
-			return oci.ErrDenied
-		}
-		if access == AccessList && repoName == "*" {
-			return nil
-		}
-		return oci.ErrNameUnknown
-	})
+	r     oci.Registry
 }
 
 func (r *accessCheckerRegistry) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {

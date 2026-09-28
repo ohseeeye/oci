@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -247,7 +247,7 @@ func TestChunkedUploadUsesUploadsDirectory(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, "blobs", desc.Digest.Algorithm().String(), desc.Digest.Encoded()))
 }
 
-func pushTestBlob(ctx context.Context, t *testing.T, reg oci.Interface, repo string, data []byte) oci.Descriptor {
+func pushTestBlob(ctx context.Context, t *testing.T, reg oci.Registry, repo string, data []byte) oci.Descriptor {
 	t.Helper()
 	desc := oci.Descriptor{
 		MediaType: "application/octet-stream",

@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ociserver/mux"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/mux"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 func marshalReferrersResponse(descs []oci.Descriptor) ([]byte, error) {

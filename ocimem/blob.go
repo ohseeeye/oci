@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // NewBytesReader returns an implementation of oci.BlobReader

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ocifilter
+package ocimiddleware
 
 import (
 	"context"
@@ -21,8 +21,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociauth"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ociauth"
 )
 
 // Sub returns r wrapped so that it addresses only
@@ -44,7 +44,7 @@ import (
 //
 //	b/c
 //	d
-func Sub(r oci.Interface, pathPrefix string) oci.Interface {
+func Sub(r oci.Registry, pathPrefix string) oci.Registry {
 	if pathPrefix == "" {
 		return r
 	}
@@ -59,7 +59,7 @@ func Sub(r oci.Interface, pathPrefix string) oci.Interface {
 type subRegistry struct {
 	*oci.Funcs
 	prefix string
-	r      oci.Interface
+	r      oci.Registry
 }
 
 func (r *subRegistry) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {

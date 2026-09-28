@@ -25,10 +25,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 
-	"github.com/docker/oci/ociauth"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociauth"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 // PushManifest pushes a manifest with the given media type and contents.
@@ -112,7 +112,7 @@ func manifestURLWithTags(repo string, tagOrDigest string, tags []string) string 
 // source tag or digest.
 //
 // Experimental: CopyImage uses a registry extension and is not part of
-// [oci.Interface] or the OCI distribution specification.
+// [oci.Registry] or the OCI distribution specification.
 func (c *Client) CopyImage(ctx context.Context, fromRepo, toRepo, reference string) (oci.Descriptor, error) {
 	q := url.Values{}
 	q.Set("from", fromRepo)

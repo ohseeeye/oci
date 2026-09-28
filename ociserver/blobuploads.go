@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ociref"
-	"github.com/docker/oci/ociserver/mux"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/mux"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 func (s *Server) blobUploadGet() http.HandlerFunc {

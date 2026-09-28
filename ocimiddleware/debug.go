@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ocidebug is an OCI registry wrapper that prints log messages
-// on registry operations.
-package ocidebug
+package ocimiddleware
 
 import (
 	"context"
@@ -24,12 +22,12 @@ import (
 	"log"
 	"sync/atomic"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
-// New returns a new [oci.Interface] that wraps r and logs all operations
+// Debug returns a new [oci.Registry] that wraps r and logs all operations
 // using the given logf function. If logf is nil, [log.Printf] is used.
-func New(r oci.Interface, logf func(f string, a ...any)) oci.Interface {
+func Debug(r oci.Registry, logf func(f string, a ...any)) oci.Registry {
 	if logf == nil {
 		logf = log.Printf
 	}
@@ -43,7 +41,7 @@ var blobWriterID int32
 
 type logger struct {
 	logf func(f string, a ...any)
-	r    oci.Interface
+	r    oci.Registry
 	*oci.Funcs
 }
 

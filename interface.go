@@ -19,35 +19,35 @@
 //
 // Packages within this module provide the capability to translate to and
 // from the HTTP protocol documented in that specification:
-// - [github.com/docker/oci/ociclient] provides an [Interface] value
+// - [github.com/ohseeeye/oci/ociclient] provides an [Registry] value
 // that acts as an HTTP client.
-// - [github.com/docker/oci/ociserver] provides an HTTP server
+// - [github.com/ohseeeye/oci/ociserver] provides an HTTP server
 // that serves the distribution protocol by making calls to an arbitrary
-// [Interface] value.
+// [Registry] value.
 //
 // When used together in a stack, the above two packages can be used
 // to provide a simple proxy server.
 //
-// The [github.com/docker/oci/ocimem] package provides a trivial
-// in-memory implementation of the interface.
+// The [github.com/ohseeeye/oci/ocimem] package provides a trivial
+// in-memory implementation of the registry interface.
 //
-// Other packages provide some utilities that manipulate [Interface] values:
-// - [github.com/docker/oci/ocifilter] provides functionality for exposing
+// Other packages provide some utilities that manipulate [Registry] values:
+// - [github.com/ohseeeye/oci/ocimiddleware] provides functionality for exposing
 // modified or restricted views onto a registry.
-// - [github.com/docker/oci/ociunify] can combine two registries into one
+// - [github.com/ohseeeye/oci/ociunify] can combine two registries into one
 // unified view across both.
 //
-// # Notes on [Interface]
+// # Notes on [Registry]
 //
-// In general, the caller cannot assume that the implementation of a given [Interface] value
-// is present on the network. For example, [github.com/docker/oci/ocimem]
+// In general, the caller cannot assume that the implementation of a given [Registry] value
+// is present on the network. For example, [github.com/ohseeeye/oci/ocimem]
 // doesn't know about the network at all. But there are times when an implementation
 // might want to provide information about the location of blobs or manifests so
 // that a client can go direct if it wishes. That is, a proxy might not wish
 // to ship all the traffic for all blobs through itself, but instead redirect clients
 // to talk to some other location on the internet.
 //
-// When an [Interface] implementation wishes to provide that information, it
+// When an [Registry] implementation wishes to provide that information, it
 // can do so by setting the `URLs` field on the descriptor that it returns for
 // a given blob or manifest. Although it is not mandatory for a caller to use
 // this, some callers (specifically the ociserver package) can use this information
@@ -62,10 +62,10 @@ import (
 	"iter"
 )
 
-// Interface defines a generic interface to a single OCI registry.
+// Registry defines a generic interface to a single OCI registry.
 // It does not support cross-registry operations: all methods are
 // directed to the receiver only.
-type Interface interface {
+type Registry interface {
 	Writer
 	Reader
 	Deleter

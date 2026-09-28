@@ -21,18 +21,18 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 func (u unifier) Repositories(ctx context.Context, startAfter string) iter.Seq2[string, error] {
-	r0, r1 := both(u, func(r oci.Interface, _ int) iter.Seq2[string, error] {
+	r0, r1 := both(u, func(r oci.Registry, _ int) iter.Seq2[string, error] {
 		return r.Repositories(ctx, startAfter)
 	})
 	return mergeIter(r0, r1, strings.Compare)
 }
 
 func (u unifier) Tags(ctx context.Context, repo string, params *oci.TagsParameters) iter.Seq2[string, error] {
-	r0, r1 := both(u, func(r oci.Interface, _ int) iter.Seq2[string, error] {
+	r0, r1 := both(u, func(r oci.Registry, _ int) iter.Seq2[string, error] {
 		return r.Tags(ctx, repo, params)
 	})
 	it := mergeIter(r0, r1, strings.Compare)
@@ -47,7 +47,7 @@ func (u unifier) Tags(ctx context.Context, repo string, params *oci.TagsParamete
 }
 
 func (u unifier) Referrers(ctx context.Context, repo string, digest oci.Digest, params *oci.ReferrersParameters) iter.Seq2[oci.Descriptor, error] {
-	r0, r1 := both(u, func(r oci.Interface, _ int) iter.Seq2[oci.Descriptor, error] {
+	r0, r1 := both(u, func(r oci.Registry, _ int) iter.Seq2[oci.Descriptor, error] {
 		return r.Referrers(ctx, repo, digest, params)
 	})
 	return mergeIter(r0, r1, compareDescriptor)

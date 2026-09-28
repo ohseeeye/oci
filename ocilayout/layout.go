@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ocilayout provides an [oci.Interface] implementation backed by an
+// Package ocilayout provides an [oci.Registry] implementation backed by an
 // OCI Image Layout directory.
 package ocilayout
 
@@ -26,8 +26,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 const (
@@ -42,7 +42,7 @@ type Options struct {
 	DefaultRepo string
 }
 
-// Registry is an OCI Image Layout backed implementation of [oci.Interface].
+// Registry is an OCI Image Layout backed implementation of [oci.Registry].
 type Registry struct {
 	*oci.Funcs
 	mu    sync.Mutex
@@ -51,7 +51,7 @@ type Registry struct {
 	state *layoutState
 }
 
-var _ oci.Interface = (*Registry)(nil)
+var _ oci.Registry = (*Registry)(nil)
 
 type layoutState struct {
 	dir   string

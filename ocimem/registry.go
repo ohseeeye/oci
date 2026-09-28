@@ -20,13 +20,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
-var _ oci.Interface = (*Registry)(nil)
+var _ oci.Registry = (*Registry)(nil)
 
-// Registry is an in-memory implementation of [oci.Interface].
+// Registry is an in-memory implementation of [oci.Registry].
 type Registry struct {
 	*oci.Funcs
 	cfg   Config
@@ -66,7 +66,7 @@ func New() *Registry {
 	return NewWithConfig(nil)
 }
 
-// NewWithConfig returns a new in-memory [oci.Interface]
+// NewWithConfig returns a new in-memory [oci.Registry]
 // implementation using the given configuration. If
 // cfg is nil, it's treated the same as a pointer to the zero [Config] value.
 func NewWithConfig(cfg0 *Config) *Registry {

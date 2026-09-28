@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ocifilter
+package ocimiddleware
 
 import (
 	"context"
@@ -20,12 +20,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/docker/oci/ocimem"
+	"github.com/ohseeeye/oci/ocimem"
 )
 
 var testDigest = ocidigest.FromBytes([]byte("test"))
@@ -43,7 +43,7 @@ func TestAccessCheckerErrorReturn(t *testing.T) {
 }
 
 func TestAccessCheckerAccessRequest(t *testing.T) {
-	assertAccess := func(wantAccess []accessCheck, do func(ctx context.Context, r oci.Interface) error) {
+	assertAccess := func(wantAccess []accessCheck, do func(ctx context.Context, r oci.Registry) error) {
 		testErr := errors.New("some error")
 		var gotAccess []accessCheck
 		r := AccessChecker(&oci.Funcs{
@@ -60,13 +60,13 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 	}
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := r.GetBlob(ctx, "foo/read", testDigest)
 		return err
 	})
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		rd, err := r.GetBlobRange(ctx, "foo/read", testDigest, 100, 200)
 		if rd != nil {
 			rd.Close()
@@ -76,7 +76,7 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		rd, err := r.GetManifest(ctx, "foo/read", testDigest)
 		if rd != nil {
 			rd.Close()
@@ -86,7 +86,7 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		rd, err := r.GetTag(ctx, "foo/read", "sometag")
 		if rd != nil {
 			rd.Close()
@@ -96,28 +96,28 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := r.ResolveBlob(ctx, "foo/read", testDigest)
 		return err
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := r.ResolveManifest(ctx, "foo/read", testDigest)
 		return err
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := r.ResolveTag(ctx, "foo/read", "sometag")
 		return err
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/write", AccessWrite},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := r.PushBlob(ctx, "foo/write", oci.Descriptor{
 			MediaType: "application/json",
 			Digest:    testDigest,
@@ -128,7 +128,7 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 
 	assertAccess([]accessCheck{
 		{"foo/write", AccessWrite},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		w, err := r.PushBlobChunked(ctx, "foo/write", 0)
 		if err != nil {
 			return err
@@ -139,7 +139,7 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 
 	assertAccess([]accessCheck{
 		{"foo/write", AccessWrite},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		w, err := r.PushBlobChunkedResume(ctx, "foo/write", "/someid", 3, 0)
 		if err != nil {
 			return err
@@ -155,14 +155,14 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 	assertAccess([]accessCheck{
 		{"foo/read", AccessRead},
 		{"foo/write", AccessWrite},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := r.MountBlob(ctx, "foo/read", "foo/write", testDigest)
 		return err
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/write", AccessWrite},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := r.PushManifest(ctx, "foo/write", []byte("something"), "application/json", &oci.PushManifestParameters{
 			Tags: []string{"sometag"},
 		})
@@ -171,39 +171,39 @@ func TestAccessCheckerAccessRequest(t *testing.T) {
 
 	assertAccess([]accessCheck{
 		{"foo/write", AccessDelete},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		return r.DeleteBlob(ctx, "foo/write", testDigest)
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/write", AccessDelete},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		return r.DeleteManifest(ctx, "foo/write", testDigest)
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/write", AccessDelete},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		return r.DeleteTag(ctx, "foo/write", "sometag")
 	})
 
 	assertAccess([]accessCheck{
 		{"*", AccessList},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := oci.All(r.Repositories(ctx, ""))
 		return err
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/read", AccessList},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := oci.All(r.Tags(ctx, "foo/read", nil))
 		return err
 	})
 
 	assertAccess([]accessCheck{
 		{"foo/read", AccessList},
-	}, func(ctx context.Context, r oci.Interface) error {
+	}, func(ctx context.Context, r oci.Registry) error {
 		_, err := oci.All(r.Referrers(ctx, "foo/read", testDigest, nil))
 		return err
 	})

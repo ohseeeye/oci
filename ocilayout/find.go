@@ -20,8 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // FindLayout splits path into an OCI image layout directory and image

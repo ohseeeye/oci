@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	oci "github.com/docker/oci"
+	oci "github.com/ohseeeye/oci"
 )
 
 // TODO decide on a good value for this.

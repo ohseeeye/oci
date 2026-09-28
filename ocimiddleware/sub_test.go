@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ocifilter
+package ocimiddleware
 
 import (
 	"context"
@@ -22,10 +22,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociauth"
-	"github.com/docker/oci/ocimem"
-	"github.com/docker/oci/ocitest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/ocimem"
+	"github.com/ohseeeye/oci/ocitest"
+	"github.com/ohseeeye/oci/pkg/ociauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,7 +114,7 @@ func TestSubMaintainsAuthScope(t *testing.T) {
 	// As the implementation is so uniform (and easily inspected in the source,
 	// we use the GetBlob entry point as a proxy for testing all the entry points.
 	// TODO it would be nice to have a reusable way (in ocitest, probably) of testing general properties
-	// across all oci.Interface methods.
+	// across all oci.Registry methods.
 	_, _ = r.GetBlob(ctx, "some/repo", ocitest.DigestRef("scope"))
 	wantScope := ociauth.ParseScope(
 		"other registry:catalog:* repository:foo/bar/a/b:pull,push repository:foo/bar/foo:delete,push",
@@ -123,7 +123,7 @@ func TestSubMaintainsAuthScope(t *testing.T) {
 }
 
 type contextChecker struct {
-	oci.Interface
+	oci.Registry
 	check func(context.Context)
 }
 
@@ -132,7 +132,7 @@ func (r contextChecker) GetBlob(ctx context.Context, repo string, digest oci.Dig
 	return nil, fmt.Errorf("nope")
 }
 
-func getManifest(t *testing.T, r oci.Interface, repo string, dg oci.Digest) oci.IndexOrManifest {
+func getManifest(t *testing.T, r oci.Registry, repo string, dg oci.Digest) oci.IndexOrManifest {
 	rd, err := r.GetManifest(context.Background(), repo, dg)
 	require.NoError(t, err)
 	defer rd.Close()
@@ -144,7 +144,7 @@ func getManifest(t *testing.T, r oci.Interface, repo string, dg oci.Digest) oci.
 	return m
 }
 
-func getBlob(t *testing.T, r oci.Interface, repo string, dg oci.Digest) []byte {
+func getBlob(t *testing.T, r oci.Registry, repo string, dg oci.Digest) []byte {
 	rd, err := r.GetBlob(context.Background(), repo, dg)
 	require.NoError(t, err)
 	defer rd.Close()

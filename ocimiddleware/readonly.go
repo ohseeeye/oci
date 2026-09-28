@@ -12,6 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ocisrv
+package ocimiddleware
 
-listenAddr: *"localhost:5000" | _
+import "github.com/ohseeeye/oci"
+
+// ReadOnly returns a registry implementation that returns
+// an "operation unsupported" error from all entry points that
+// mutate the registry.
+func ReadOnly(r oci.Registry) oci.Registry {
+	// One level deeper so the Reader and Lister values take precedence,
+	// following Go's shallower-method-wins rules.
+	type deeper struct {
+		*oci.Funcs
+	}
+	return struct {
+		oci.Reader
+		oci.Lister
+		deeper
+	}{
+		Reader: r,
+		Lister: r,
+	}
+}

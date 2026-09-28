@@ -19,7 +19,7 @@ import (
 	"iter"
 	"testing"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 	"github.com/stretchr/testify/require"
 )
 

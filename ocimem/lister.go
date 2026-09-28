@@ -20,7 +20,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // Repositories returns an iterator over all repository names in the registry.

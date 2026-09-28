@@ -19,7 +19,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // GetBlob returns the content of the blob with the given digest.
