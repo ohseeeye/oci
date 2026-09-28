@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/ohseeeye/oci"
-	"github.com/ohseeeye/oci/ocitest"
+	"github.com/ohseeeye/oci/internal/ocitest"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )

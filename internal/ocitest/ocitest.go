@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ocitest provides some helper types for writing oci-related
+// Package ocitest provides shared helpers for this project's OCI-related
 // tests. It's designed to be used alongside [stretchr/testify].
 //
 // [stretchr/testify]: https://pkg.go.dev/github.com/stretchr/testify
