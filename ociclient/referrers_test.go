@@ -11,14 +11,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 
-	"github.com/docker/oci/ociclient"
-	"github.com/docker/oci/ocidebug"
-	"github.com/docker/oci/ocimem"
-	"github.com/docker/oci/ociserver"
+	"github.com/ohseeeye/oci/ociclient"
+	"github.com/ohseeeye/oci/ocimem"
+	"github.com/ohseeeye/oci/ocimiddleware"
+	"github.com/ohseeeye/oci/ociserver"
 )
 
 func TestReferrersFallback(t *testing.T) {
@@ -26,7 +26,7 @@ func TestReferrersFallback(t *testing.T) {
 
 	// Test that the client falls back to using the referrers tag API
 	// when the referrers API is not enabled.
-	handler, err := ociserver.New(ocidebug.New(ocimem.New(), t.Logf), nil)
+	handler, err := ociserver.New(ocimiddleware.Debug(ocimem.New(), t.Logf), nil)
 	require.NoError(t, err)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/referrers/") {
@@ -94,7 +94,7 @@ func ref[T any](x T) *T {
 	return &x
 }
 
-func pushScratchConfig(t *testing.T, client oci.Interface, repo string) oci.Descriptor {
+func pushScratchConfig(t *testing.T, client oci.Registry, repo string) oci.Descriptor {
 	content := []byte("{}")
 	desc := oci.Descriptor{
 		Digest: ocidigest.FromBytes(content),
@@ -105,7 +105,7 @@ func pushScratchConfig(t *testing.T, client oci.Interface, repo string) oci.Desc
 	return desc
 }
 
-func pushManifest(t *testing.T, client oci.Interface, repo, tag string, content any, mediaType string) oci.Descriptor {
+func pushManifest(t *testing.T, client oci.Registry, repo, tag string, content any, mediaType string) oci.Descriptor {
 	data, err := json.Marshal(content)
 	require.NoError(t, err)
 	var params *oci.PushManifestParameters
@@ -119,7 +119,7 @@ func pushManifest(t *testing.T, client oci.Interface, repo, tag string, content 
 	return desc
 }
 
-func mustNewOCIClient(srvURL string, opts *ociclient.Options) oci.Interface {
+func mustNewOCIClient(srvURL string, opts *ociclient.Options) oci.Registry {
 	if opts == nil {
 		opts = new(ociclient.Options)
 	}

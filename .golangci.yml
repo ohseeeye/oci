@@ -146,7 +146,7 @@ linters:
       # Inherited code: pre-existing duplicate words from upstream.
       - linters:
           - dupword
-        path: (ociauth/auth\.go|ociref/reference\.go)
+        path: (pkg/ociauth/auth\.go|pkg/ociref/reference\.go)
       # Inherited code: resp.Body.Close and io.Copy in HTTP handlers.
       - linters:
           - errcheck
@@ -154,7 +154,7 @@ linters:
       # Inherited code: string HTTP method constants.
       - linters:
           - usestdlibvars
-        path: (ociclient/|ociauth/)
+        path: (ociclient/|pkg/ociauth/)
       # Inherited code: bodyclose false positives in forked client code.
       - linters:
           - bodyclose
@@ -162,7 +162,7 @@ linters:
       # Inherited code: noctx in authfile helper.
       - linters:
           - noctx
-        path: ociauth/authfile\.go
+        path: pkg/ociauth/authfile\.go
       # Inherited code: errname on WireErrors type.
       - linters:
           - errname
@@ -183,7 +183,7 @@ linters:
       # Inherited code: testifylint suggestions on existing tests.
       - linters:
           - testifylint
-        path: (error_test\.go|iter_test\.go|ociclient/error_test\.go|ocifilter/select_test\.go|ociauth/auth_test\.go)
+        path: (error_test\.go|iter_test\.go|ociclient/error_test\.go|ocimiddleware/access_test\.go|pkg/ociauth/auth_test\.go)
       # Inherited code: whitespace in existing tests.
       - linters:
           - whitespace

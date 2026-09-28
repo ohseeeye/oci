@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ocifilter
+package ocimiddleware
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +37,7 @@ func ExampleSelector() {
 			return nil
 		},
 	}
-	r := Selector(func(repo string) oci.Interface {
+	r := Selector(func(repo string) oci.Registry {
 		namespace, _, _ := strings.Cut(repo, "/")
 		if namespace == "local" {
 			return local
@@ -68,7 +68,7 @@ func TestSelector(t *testing.T) {
 			return oci.Descriptor{Size: 2}, nil
 		},
 	}
-	r := Selector(func(repo string) oci.Interface {
+	r := Selector(func(repo string) oci.Registry {
 		if repo == "local/foo" {
 			return r0
 		}
@@ -97,7 +97,7 @@ func TestSelectorMountUsesDestinationRepository(t *testing.T) {
 			return oci.Descriptor{Size: 42}, nil
 		},
 	}
-	r := Selector(func(repo string) oci.Interface {
+	r := Selector(func(repo string) oci.Registry {
 		if repo == "destination/repo" {
 			return destination
 		}
@@ -112,7 +112,7 @@ func TestSelectorMountUsesDestinationRepository(t *testing.T) {
 }
 
 func TestSelectorRepositoriesUnsupported(t *testing.T) {
-	r := Selector(func(string) oci.Interface {
+	r := Selector(func(string) oci.Registry {
 		t.Fatal("selector unexpectedly called")
 		return nil
 	})

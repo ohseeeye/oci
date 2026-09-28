@@ -3,7 +3,7 @@ package oci
 import (
 	"testing"
 
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )
 

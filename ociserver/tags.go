@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociref"
-	"github.com/docker/oci/ociserver/mux"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/mux"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 func (s *Server) tagsGet() http.HandlerFunc {

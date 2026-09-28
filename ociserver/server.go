@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociref"
-	"github.com/docker/oci/ociserver/mux"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/mux"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // ServerConfig configures a [Server].
@@ -32,7 +32,7 @@ type ServerConfig struct {
 type Server struct {
 	cfg      ServerConfig
 	mux      *mux.Mux
-	db       oci.Interface
+	db       oci.Registry
 	redirect Redirecter
 }
 
@@ -41,7 +41,7 @@ var _ http.Handler = (*Server)(nil)
 // New returns a new server backed by pers. A nil cfg is equivalent to a
 // pointer to a zero [ServerConfig]. The configuration is copied before New
 // returns and may be modified by the caller afterward.
-func New(pers oci.Interface, cfg0 *ServerConfig) (*Server, error) {
+func New(pers oci.Registry, cfg0 *ServerConfig) (*Server, error) {
 	var cfg ServerConfig
 	if cfg0 != nil {
 		cfg = *cfg0

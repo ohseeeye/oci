@@ -23,8 +23,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 func blobPath(dir string, digest oci.Digest) (string, error) {

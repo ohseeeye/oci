@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociauth"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ociauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +24,7 @@ func TestClientDo(t *testing.T) {
 			require.Equal(t, "https", req.URL.Scheme)
 			require.Equal(t, "registry.example", req.URL.Host)
 			require.Equal(t, "/v2/foo/bar/custom", req.URL.Path)
-			require.Equal(t, "docker/oci", req.Header.Get("User-Agent"))
+			require.Equal(t, "ohseeeye/oci", req.Header.Get("User-Agent"))
 			require.True(t, wantScope.Equal(ociauth.RequestInfoFromContext(req.Context()).RequiredScope))
 			return &http.Response{
 				StatusCode: http.StatusTeapot,

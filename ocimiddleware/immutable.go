@@ -12,27 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ocifilter implements "filter" functions that wrap or combine oci
-// implementations in different ways.
-package ocifilter
+package ocimiddleware
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 // Immutable returns a registry wrap r but only allows content to be
 // added but not changed once added: nothing can be deleted and tags
 // can't be changed.
-func Immutable(r oci.Interface) oci.Interface {
+func Immutable(r oci.Registry) oci.Registry {
 	return immutable{r}
 }
 
 type immutable struct {
-	oci.Interface
+	oci.Registry
 }
 
 func (r immutable) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
@@ -41,7 +39,7 @@ func (r immutable) PushManifest(ctx context.Context, repo string, contents []byt
 		tags = params.Tags
 	}
 	if len(tags) == 0 {
-		return r.Interface.PushManifest(ctx, repo, contents, mediaType, params)
+		return r.Registry.PushManifest(ctx, repo, contents, mediaType, params)
 	}
 	var dig oci.Digest
 	if params != nil && params.Digest != "" {
@@ -59,7 +57,7 @@ func (r immutable) PushManifest(ctx context.Context, repo string, contents []byt
 			return oci.Descriptor{}, fmt.Errorf("this store is immutable: %w", oci.ErrDenied)
 		}
 	}
-	desc, err := r.Interface.PushManifest(ctx, repo, contents, mediaType, params)
+	desc, err := r.Registry.PushManifest(ctx, repo, contents, mediaType, params)
 	if err != nil {
 		return oci.Descriptor{}, err
 	}

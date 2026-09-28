@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ocitest provides some helper types for writing oci-related
+// Package ocitest provides shared helpers for this project's OCI-related
 // tests. It's designed to be used alongside [stretchr/testify].
 //
 // [stretchr/testify]: https://pkg.go.dev/github.com/stretchr/testify
@@ -28,16 +28,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )
 
-// Registry wraps an [oci.Interface] with convenience methods for
+// Registry wraps an [oci.Registry] with convenience methods for
 // pushing and verifying content in tests.
 type Registry struct {
 	T *testing.T
-	R oci.Interface
+	R oci.Registry
 }
 
 // NewRegistry returns a Registry instance that wraps r, providing
@@ -45,7 +45,7 @@ type Registry struct {
 // inside the given test instance.
 //
 // When a Must* method fails, it will fail using t.
-func NewRegistry(t *testing.T, r oci.Interface) Registry {
+func NewRegistry(t *testing.T, r oci.Registry) Registry {
 	return Registry{t, r}
 }
 
@@ -100,7 +100,7 @@ func DigestRef(id string) oci.Digest {
 //
 // It returns a map mapping repository name to the descriptors
 // describing the content that has actually been pushed.
-func PushContent(r oci.Interface, rc RegistryContent) (map[string]PushedRepoContent, error) {
+func PushContent(r oci.Registry, rc RegistryContent) (map[string]PushedRepoContent, error) {
 	regContent := make(map[string]PushedRepoContent)
 	for repo, repoc := range rc {
 		prc, err := PushRepoContent(r, repo, repoc)
@@ -113,7 +113,7 @@ func PushContent(r oci.Interface, rc RegistryContent) (map[string]PushedRepoCont
 }
 
 // PushRepoContent pushes the content for a single repository.
-func PushRepoContent(r oci.Interface, repo string, repoc RepoContent) (PushedRepoContent, error) {
+func PushRepoContent(r oci.Registry, repo string, repoc RepoContent) (PushedRepoContent, error) {
 	ctx := context.Background()
 	prc := PushedRepoContent{
 		Manifests:    make(map[string]oci.Descriptor),
@@ -334,7 +334,7 @@ func (r Registry) MustPushManifest(repo string, jsonObject any, tag string) ([]b
 type Repo struct {
 	T    *testing.T
 	Name string
-	R    oci.Interface
+	R    oci.Registry
 }
 
 // AssertBlobContent checks that r matches the expected data and has the

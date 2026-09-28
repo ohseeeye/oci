@@ -21,8 +21,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 // GetBlob returns the content of the blob with the given digest.

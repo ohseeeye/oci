@@ -15,32 +15,15 @@
 package main
 
 import (
-	_ "embed"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"reflect"
 
-	"github.com/cue-exp/cueconfig"
-	"github.com/docker/oci/ociserver"
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
+	"github.com/ohseeeye/oci/ocimem"
+	"github.com/ohseeeye/oci/ociserver"
 )
-
-var (
-	//go:embed schema.cue
-	configSchema []byte
-
-	//go:embed defaults.cue
-	configDefaults []byte
-)
-
-type config struct {
-	Registry   registry `json:"registry"`
-	ListenAddr string   `json:"listenAddr"`
-}
 
 func main() {
 	if err := main1(); err != nil {
@@ -52,34 +35,21 @@ func main() {
 var writeNetAddr func(l net.Listener)
 
 func main1() error {
+	listenAddr := flag.String("listen", "localhost:5000", "address on which to listen")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: ocisrv $configfile.cue\n")
+		fmt.Fprintln(os.Stderr, "usage: ocisrv [-listen address]")
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
 	flag.Parse()
-	if flag.NArg() != 1 {
+	if flag.NArg() != 0 {
 		flag.Usage()
 	}
-	configFile := flag.Arg(0)
 
-	// Don't decode into Go struct yet because we want to use
-	// json v2 for that so we can decode into the registry interface
-	// type.
-	var cfgRaw jsontext.Value
-	if err := cueconfig.Load(configFile, configSchema, configDefaults, nil, &cfgRaw); err != nil {
-		return err
-	}
-	cfg, err := unmarshalConfig(cfgRaw)
+	r := ocimem.New()
+	l, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
-		return fmt.Errorf("cannot decode config: %v", err)
-	}
-	r, err := cfg.Registry.new()
-	if err != nil {
-		return fmt.Errorf("cannot construct registry: %v", err)
-	}
-	l, err := net.Listen("tcp", cfg.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("cannot listen on %q: %v", cfg.ListenAddr, err)
+		return fmt.Errorf("cannot listen on %q: %v", *listenAddr, err)
 	}
 	if writeNetAddr != nil {
 		writeNetAddr(l)
@@ -91,37 +61,4 @@ func main1() error {
 	}
 	err = http.Serve(l, srv)
 	return fmt.Errorf("http server error: %v", err)
-}
-
-func unmarshalConfig(cfgRaw []byte) (*config, error) {
-	var cfg config
-	if err := json.Unmarshal(cfgRaw, &cfg, json.WithUnmarshalers(
-		json.UnmarshalFuncV2(unmarshalRegistry),
-	)); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
-func unmarshalRegistry(dec *jsontext.Decoder, rp *registry, opts json.Options) error {
-	var data jsontext.Value
-	if err := json.UnmarshalDecode(dec, &data, opts); err != nil {
-		return err
-	}
-	var kind struct {
-		Kind string `json:"kind"`
-	}
-	if err := json.Unmarshal(data, &kind); err != nil {
-		return err
-	}
-	t := kindToRegistryType[kind.Kind]
-	if t == nil {
-		return fmt.Errorf("no registry type found for kind %q", kind.Kind)
-	}
-	r := reflect.New(t)
-	if err := json.Unmarshal(data, r.Interface()); err != nil {
-		return err
-	}
-	*rp = r.Elem().Interface().(registry)
-	return nil
 }

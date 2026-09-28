@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 type refKind int

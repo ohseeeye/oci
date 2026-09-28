@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 func (u unifier) PushBlob(ctx context.Context, repo string, desc oci.Descriptor, r io.Reader) (oci.Descriptor, error) {
 	resultc := make(chan t2[oci.Descriptor])
-	onePush := func(ri oci.Interface, r *io.PipeReader) {
+	onePush := func(ri oci.Registry, r *io.PipeReader) {
 		desc, err := ri.PushBlob(ctx, repo, desc, r)
 		r.CloseWithError(err)
 		resultc <- t2[oci.Descriptor]{desc, err}
@@ -49,7 +49,7 @@ func (u unifier) PushBlob(ctx context.Context, repo string, desc oci.Descriptor,
 }
 
 func (u unifier) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
-	r0, r1 := both(u, func(r oci.Interface, _ int) t2[oci.Descriptor] {
+	r0, r1 := both(u, func(r oci.Registry, _ int) t2[oci.Descriptor] {
 		return mk2(r.PushManifest(ctx, repo, contents, mediaType, params))
 	})
 	if (r0.err == nil) == (r1.err == nil) {
@@ -59,7 +59,7 @@ func (u unifier) PushManifest(ctx context.Context, repo string, contents []byte,
 }
 
 func (u unifier) PushBlobChunked(ctx context.Context, repo string, chunkSize int) (oci.BlobWriter, error) {
-	r0, r1 := both(u, func(r oci.Interface, i int) t2[oci.BlobWriter] {
+	r0, r1 := both(u, func(r oci.Registry, i int) t2[oci.BlobWriter] {
 		return mk2(r.PushBlobChunked(ctx, repo, chunkSize))
 	})
 	if r0.err != nil || r1.err != nil {
@@ -87,7 +87,7 @@ func (u unifier) PushBlobChunkedResume(ctx context.Context, repo, id string, off
 	if len(ids) != 2 {
 		return nil, fmt.Errorf("malformed ID %q (expected two elements)", id)
 	}
-	r0, r1 := both(u, func(r oci.Interface, i int) t2[oci.BlobWriter] {
+	r0, r1 := both(u, func(r oci.Registry, i int) t2[oci.BlobWriter] {
 		return mk2(r.PushBlobChunkedResume(ctx, repo, ids[i], offset, chunkSize))
 	})
 	if r0.err != nil || r1.err != nil {
@@ -110,7 +110,7 @@ func (u unifier) PushBlobChunkedResume(ctx context.Context, repo, id string, off
 
 func (u unifier) MountBlob(ctx context.Context, fromRepo, toRepo string, digest oci.Digest) (oci.Descriptor, error) {
 	return bothResults(both(u,
-		func(r oci.Interface, _ int) t2[oci.Descriptor] {
+		func(r oci.Registry, _ int) t2[oci.Descriptor] {
 			return mk2(r.MountBlob(ctx, fromRepo, toRepo, digest))
 		},
 	)).get()
@@ -123,7 +123,7 @@ type unifiedBlobWriter struct {
 }
 
 func (w *unifiedBlobWriter) Write(buf []byte) (int, error) {
-	r := bothResults(both(w.u, func(_ oci.Interface, i int) t2[int] {
+	r := bothResults(both(w.u, func(_ oci.Registry, i int) t2[int] {
 		return mk2(w.w[i].Write(buf))
 	}))
 	if r.err != nil {
@@ -134,13 +134,13 @@ func (w *unifiedBlobWriter) Write(buf []byte) (int, error) {
 }
 
 func (w *unifiedBlobWriter) Close() error {
-	return bothResults(both(w.u, func(_ oci.Interface, i int) t1 {
+	return bothResults(both(w.u, func(_ oci.Registry, i int) t1 {
 		return mk1(w.w[i].Close())
 	})).err
 }
 
 func (w *unifiedBlobWriter) Cancel() error {
-	return bothResults(both(w.u, func(_ oci.Interface, i int) t1 {
+	return bothResults(both(w.u, func(_ oci.Registry, i int) t1 {
 		return mk1(w.w[i].Cancel())
 	})).err
 }
@@ -161,7 +161,7 @@ func (w *unifiedBlobWriter) ID() string {
 }
 
 func (w *unifiedBlobWriter) Commit(digest oci.Digest) (oci.Descriptor, error) {
-	return bothResults(both(w.u, func(_ oci.Interface, i int) t2[oci.Descriptor] {
+	return bothResults(both(w.u, func(_ oci.Registry, i int) t2[oci.Descriptor] {
 		return mk2(w.w[i].Commit(digest))
 	})).get()
 }

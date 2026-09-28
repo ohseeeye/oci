@@ -8,9 +8,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ocitest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/internal/ocitest"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )
 

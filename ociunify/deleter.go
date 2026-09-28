@@ -17,7 +17,7 @@ package ociunify
 import (
 	"context"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // Deleter methods
@@ -26,19 +26,19 @@ import (
 // registry but fails due to a not-found error in the other.
 
 func (u unifier) DeleteBlob(ctx context.Context, repo string, digest oci.Digest) error {
-	return bothResults(both(u, func(r oci.Interface, _ int) t1 {
+	return bothResults(both(u, func(r oci.Registry, _ int) t1 {
 		return mk1(r.DeleteBlob(ctx, repo, digest))
 	})).err
 }
 
 func (u unifier) DeleteManifest(ctx context.Context, repo string, digest oci.Digest) error {
-	return bothResults(both(u, func(r oci.Interface, _ int) t1 {
+	return bothResults(both(u, func(r oci.Registry, _ int) t1 {
 		return mk1(r.DeleteManifest(ctx, repo, digest))
 	})).err
 }
 
 func (u unifier) DeleteTag(ctx context.Context, repo string, name string) error {
-	return bothResults(both(u, func(r oci.Interface, _ int) t1 {
+	return bothResults(both(u, func(r oci.Registry, _ int) t1 {
 		return mk1(r.DeleteTag(ctx, repo, name))
 	})).err
 }

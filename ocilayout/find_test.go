@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociref"
 	"github.com/stretchr/testify/require"
 )
 

@@ -1,7 +1,7 @@
 package oci
 
 import (
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // IsValidRepoName reports whether the given repository

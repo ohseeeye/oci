@@ -334,7 +334,7 @@ var (
 	ErrTooManyRequests     = NewError("too many requests", "TOOMANYREQUESTS", nil)
 	ErrReferenced          = NewError("referenced by another object", "DENIED", nil)
 
-	// ErrRangeInvalid allows Interface implementations to reject invalid ranges,
+	// ErrRangeInvalid allows Registry implementations to reject invalid ranges,
 	// such as a chunked upload PATCH not following the range from a previous PATCH.
 	// ociserver relies on this error to return 416 HTTP status codes.
 	//

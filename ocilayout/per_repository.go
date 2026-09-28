@@ -27,14 +27,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocifilter"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/ocimiddleware"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // NewPerRepository opens an OCI Image Layout registry that stores each
 // repository in a separate OCI layout under dir.
-func NewPerRepository(dir string, _ *PerRepoOptions) (oci.Interface, error) {
+func NewPerRepository(dir string, _ *PerRepoOptions) (oci.Registry, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("directory must not be empty")
 	}
@@ -59,11 +59,11 @@ type perRepositoryRegistry struct {
 	layout map[string]*repoLayout
 }
 
-var _ oci.Interface = (*perRepositoryRegistry)(nil)
+var _ oci.Registry = (*perRepositoryRegistry)(nil)
 
 type repoLayout struct {
-	raw oci.Interface
-	sub oci.Interface
+	raw oci.Registry
+	sub oci.Registry
 }
 
 func (r *perRepositoryRegistry) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {
@@ -229,7 +229,7 @@ func (r *perRepositoryRegistry) Referrers(ctx context.Context, repo string, dige
 	return layout.Referrers(ctx, ".", digest, params)
 }
 
-func (r *perRepositoryRegistry) layoutForRepo(repo string) (oci.Interface, error) {
+func (r *perRepositoryRegistry) layoutForRepo(repo string) (oci.Registry, error) {
 	layout, err := r.openRepoLayout(repo)
 	if err != nil {
 		return nil, err
@@ -253,7 +253,7 @@ func (r *perRepositoryRegistry) openRepoLayout(repo string) (*repoLayout, error)
 	}
 	layout := &repoLayout{
 		raw: raw,
-		sub: ocifilter.Sub(raw, repo),
+		sub: ocimiddleware.Sub(raw, repo),
 	}
 	r.layout[repo] = layout
 	return layout, nil

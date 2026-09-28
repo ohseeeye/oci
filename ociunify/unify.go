@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // Options holds configuration for the unified registry.
@@ -46,7 +46,7 @@ const (
 //
 // Writes write to both repositories. Reads of immutable data
 // come from either.
-func New(r0, r1 oci.Interface, opts *Options) oci.Interface {
+func New(r0, r1 oci.Registry, opts *Options) oci.Registry {
 	if opts == nil {
 		opts = new(Options)
 	}
@@ -58,7 +58,7 @@ func New(r0, r1 oci.Interface, opts *Options) oci.Interface {
 }
 
 type unifier struct {
-	r0, r1 oci.Interface
+	r0, r1 oci.Registry
 	opts   Options
 	*oci.Funcs
 }
@@ -84,7 +84,7 @@ type result[T any] interface {
 }
 
 // both returns the results from calling f on both registries concurrently.
-func both[T any](u unifier, f func(r oci.Interface, i int) T) (T, T) {
+func both[T any](u unifier, f func(r oci.Registry, i int) T) (T, T) {
 	c0, c1 := make(chan T), make(chan T)
 	go func() {
 		c0 <- f(u.r0, 0)
@@ -98,7 +98,7 @@ func both[T any](u unifier, f func(r oci.Interface, i int) T) (T, T) {
 // runRead calls f concurrently on each registry.
 // It returns the result from the first one that returns without error.
 // This should not be used if the return value is affected by cancelling the context.
-func runRead[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Interface, i int) T) T {
+func runRead[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Registry, i int) T) T {
 	r, cancel := runReadWithCancel(ctx, u, f)
 	cancel()
 	return r
@@ -107,7 +107,7 @@ func runRead[T result[T]](ctx context.Context, u unifier, f func(ctx context.Con
 // runReadWithCancel calls f concurrently on each registry.
 // It returns the result from the first one that returns without error
 // and a cancel function that should be called when the returned value is done with.
-func runReadWithCancel[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Interface, i int) T) (T, func()) {
+func runReadWithCancel[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Registry, i int) T) (T, func()) {
 	switch u.opts.ReadPolicy {
 	case ReadConcurrent:
 		return runReadConcurrent(ctx, u, f)
@@ -118,7 +118,7 @@ func runReadWithCancel[T result[T]](ctx context.Context, u unifier, f func(ctx c
 	}
 }
 
-func runReadSequential[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Interface, i int) T) T {
+func runReadSequential[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Registry, i int) T) T {
 	r := f(ctx, u.r0, 0)
 	if err := r.error(); err == nil {
 		return r
@@ -126,7 +126,7 @@ func runReadSequential[T result[T]](ctx context.Context, u unifier, f func(ctx c
 	return f(ctx, u.r1, 1)
 }
 
-func runReadConcurrent[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Interface, i int) T) (T, func()) {
+func runReadConcurrent[T result[T]](ctx context.Context, u unifier, f func(ctx context.Context, r oci.Registry, i int) T) (T, func()) {
 	done := make(chan struct{})
 	defer close(done)
 	type result struct {
@@ -134,7 +134,7 @@ func runReadConcurrent[T result[T]](ctx context.Context, u unifier, f func(ctx c
 		cancel func()
 	}
 	c := make(chan result)
-	sender := func(f func(context.Context, oci.Interface, int) T, reg oci.Interface, i int) {
+	sender := func(f func(context.Context, oci.Registry, int) T, reg oci.Registry, i int) {
 		ctx, cancel := context.WithCancel(ctx)
 		r := f(ctx, reg, i)
 		select {

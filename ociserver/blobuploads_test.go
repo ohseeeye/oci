@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -238,7 +238,7 @@ func TestBlobUploadPutStreamsBodyWithoutContentLength(t *testing.T) {
 	var resumeOffsets []int64
 	s := &Server{
 		db: &oci.Funcs{
-			// docker/oci currently checks PushBlobChunked_ before dispatching
+			// ohseeeye/oci currently checks PushBlobChunked_ before dispatching
 			// PushBlobChunkedResume_, so keep this non-nil in the test double.
 			PushBlobChunked_: func(context.Context, string, int) (oci.BlobWriter, error) {
 				return nil, nil

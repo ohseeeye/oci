@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

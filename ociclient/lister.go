@@ -26,8 +26,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociauth"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ociauth"
 )
 
 // Tags returns an iterator over tags in the given repository.

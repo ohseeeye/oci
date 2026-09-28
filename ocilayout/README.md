@@ -1,6 +1,6 @@
 # ocilayout
 
-Package `ocilayout` provides an `oci.Interface` implementation backed by an
+Package `ocilayout` provides an `oci.Registry` implementation backed by an
 [OCI Image Layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md)
 directory on disk.
 
@@ -22,8 +22,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocilayout"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/ocilayout"
 )
 
 func main() {

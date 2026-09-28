@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 const (

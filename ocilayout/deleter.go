@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // DeleteBlob deletes the blob with the given digest from the named repository.

@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 var (

@@ -18,20 +18,20 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // Reader methods.
 
 func (u unifier) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {
-	return runReadBlobReader(ctx, u, func(ctx context.Context, r oci.Interface, i int) t2[oci.BlobReader] {
+	return runReadBlobReader(ctx, u, func(ctx context.Context, r oci.Registry, i int) t2[oci.BlobReader] {
 		return mk2(r.GetBlob(ctx, repo, digest))
 	})
 }
 
 func (u unifier) GetBlobRange(ctx context.Context, repo string, digest oci.Digest, o0, o1 int64) (oci.BlobReader, error) {
 	return runReadBlobReader(ctx, u,
-		func(ctx context.Context, r oci.Interface, i int) t2[oci.BlobReader] {
+		func(ctx context.Context, r oci.Registry, i int) t2[oci.BlobReader] {
 			return mk2(r.GetBlobRange(ctx, repo, digest, o0, o1))
 		},
 	)
@@ -39,7 +39,7 @@ func (u unifier) GetBlobRange(ctx context.Context, repo string, digest oci.Diges
 
 func (u unifier) GetManifest(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {
 	return runReadBlobReader(ctx, u,
-		func(ctx context.Context, r oci.Interface, i int) t2[oci.BlobReader] {
+		func(ctx context.Context, r oci.Registry, i int) t2[oci.BlobReader] {
 			return mk2(r.GetManifest(ctx, repo, digest))
 		},
 	)
@@ -56,7 +56,7 @@ func (r blobReader) Close() error {
 }
 
 func (u unifier) GetTag(ctx context.Context, repo string, tagName string) (oci.BlobReader, error) {
-	r0, r1 := both(u, func(r oci.Interface, _ int) t2[oci.BlobReader] {
+	r0, r1 := both(u, func(r oci.Registry, _ int) t2[oci.BlobReader] {
 		return mk2(r.GetTag(ctx, repo, tagName))
 	})
 	switch {
@@ -79,19 +79,19 @@ func (u unifier) GetTag(ctx context.Context, repo string, tagName string) (oci.B
 }
 
 func (u unifier) ResolveBlob(ctx context.Context, repo string, digest oci.Digest) (oci.Descriptor, error) {
-	return runRead(ctx, u, func(ctx context.Context, r oci.Interface, _ int) t2[oci.Descriptor] {
+	return runRead(ctx, u, func(ctx context.Context, r oci.Registry, _ int) t2[oci.Descriptor] {
 		return mk2(r.ResolveBlob(ctx, repo, digest))
 	}).get()
 }
 
 func (u unifier) ResolveManifest(ctx context.Context, repo string, digest oci.Digest) (oci.Descriptor, error) {
-	return runRead(ctx, u, func(ctx context.Context, r oci.Interface, _ int) t2[oci.Descriptor] {
+	return runRead(ctx, u, func(ctx context.Context, r oci.Registry, _ int) t2[oci.Descriptor] {
 		return mk2(r.ResolveManifest(ctx, repo, digest))
 	}).get()
 }
 
 func (u unifier) ResolveTag(ctx context.Context, repo string, tagName string) (oci.Descriptor, error) {
-	r0, r1 := both(u, func(r oci.Interface, _ int) t2[oci.Descriptor] {
+	r0, r1 := both(u, func(r oci.Registry, _ int) t2[oci.Descriptor] {
 		return mk2(r.ResolveTag(ctx, repo, tagName))
 	})
 	switch {
@@ -110,7 +110,7 @@ func (u unifier) ResolveTag(ctx context.Context, repo string, tagName string) (o
 	panic("unreachable")
 }
 
-func runReadBlobReader(ctx context.Context, u unifier, f func(ctx context.Context, r oci.Interface, i int) t2[oci.BlobReader]) (oci.BlobReader, error) {
+func runReadBlobReader(ctx context.Context, u unifier, f func(ctx context.Context, r oci.Registry, i int) t2[oci.BlobReader]) (oci.BlobReader, error) {
 	rv, cancel := runReadWithCancel(ctx, u, f)
 	r, err := rv.get()
 	if err != nil {

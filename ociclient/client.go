@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ociclient provides an implementation of oci.Interface that
+// Package ociclient provides an implementation of oci.Registry that
 // uses HTTP to talk to the remote registry.
 package ociclient
 
@@ -29,11 +29,12 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 
-	"github.com/docker/oci/ociauth"
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci/pkg/dockerhub"
+	"github.com/ohseeeye/oci/pkg/ociauth"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // debug enables logging.
@@ -56,7 +57,7 @@ type Options struct {
 	// address the host instead of https.
 	Insecure bool
 
-	// Specifies a user agent string to use when making requests. Defaults to "docker/oci"
+	// Specifies a user agent string to use when making requests. Defaults to "ohseeeye/oci"
 	UserAgent string
 }
 
@@ -82,10 +83,10 @@ func New(host string, opts0 *Options) (*Client, error) {
 		opts.Transport = http.DefaultTransport
 	}
 	if opts.UserAgent == "" {
-		opts.UserAgent = "docker/oci"
+		opts.UserAgent = "ohseeeye/oci"
 	}
-	if host == "docker.io" {
-		host = "registry-1.docker.io"
+	if host == dockerhub.ReferenceHost {
+		host = dockerhub.RegistryHost
 	}
 	// Check that it's a valid host by forming a URL from it and checking that it matches.
 	u, err := url.Parse("https://" + host + "/path")
@@ -121,7 +122,7 @@ type Client struct {
 	listPageSize int
 }
 
-var _ oci.Interface = (*Client)(nil)
+var _ oci.Registry = (*Client)(nil)
 
 // RequestOptions holds options for [Client.Do].
 type RequestOptions struct {

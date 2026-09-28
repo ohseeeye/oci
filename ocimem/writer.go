@@ -20,9 +20,9 @@ import (
 	"io"
 	"slices"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocidigest"
-	"github.com/docker/oci/ociref"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // This file implements the oci.Writer methods.

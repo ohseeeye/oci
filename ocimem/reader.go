@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/docker/oci"
+	"github.com/ohseeeye/oci"
 )
 
 // This file implements the oci.Reader methods.

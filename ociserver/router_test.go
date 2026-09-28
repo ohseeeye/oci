@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/docker/oci/ociserver/mux"
+	"github.com/ohseeeye/oci/pkg/mux"
 )
 
 func serveTestRoute(t testing.TB, pattern string, handler http.Handler, rec *httptest.ResponseRecorder, req *http.Request) {

@@ -17,17 +17,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ocilayout"
-	"github.com/docker/oci/ocimem"
-	"github.com/docker/oci/ociserver"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/ocilayout"
+	"github.com/ohseeeye/oci/ocimem"
+	"github.com/ohseeeye/oci/ociserver"
 )
 
 const conformanceImage = "docker-oci-conformance:integration"
 
 type backendCase struct {
 	name string
-	new  func(*testing.T) oci.Interface
+	new  func(*testing.T) oci.Registry
 }
 
 func TestOCIConformance(t *testing.T) {
@@ -42,13 +42,13 @@ func TestOCIConformance(t *testing.T) {
 	backends := []backendCase{
 		{
 			name: "ocimem",
-			new: func(*testing.T) oci.Interface {
+			new: func(*testing.T) oci.Registry {
 				return ocimem.New()
 			},
 		},
 		{
 			name: "ocilayout",
-			new: func(t *testing.T) oci.Interface {
+			new: func(t *testing.T) oci.Registry {
 				r, err := ocilayout.New(t.TempDir(), nil)
 				if err != nil {
 					t.Fatalf("creating ocilayout backend: %v", err)
@@ -65,7 +65,7 @@ func TestOCIConformance(t *testing.T) {
 	}
 }
 
-func runConformance(t *testing.T, root, backendName string, backend oci.Interface) {
+func runConformance(t *testing.T, root, backendName string, backend oci.Registry) {
 	t.Helper()
 
 	handler, err := ociserver.New(backend, nil)

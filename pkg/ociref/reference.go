@@ -21,8 +21,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/oci/internal/ocidocker"
-	"github.com/docker/oci/ocidigest"
+	"github.com/ohseeeye/oci/pkg/dockerhub"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 // The following regular expressions derived from code in the
@@ -188,10 +188,10 @@ func ParseRelative(refStr string) (Reference, error) {
 		return Reference{}, err
 	}
 	// Normalize Docker Hub registry hosts, also default to Docker if none is provided
-	if _, ok := ocidocker.DockerHubHosts[ref.Host]; ok || ref.Host == "" {
-		ref.Host = "docker.io"
+	if dockerhub.IsHost(ref.Host) || ref.Host == "" {
+		ref.Host = dockerhub.ReferenceHost
 	}
-	if ref.Host == "docker.io" && !strings.Contains(ref.Repository, "/") {
+	if ref.Host == dockerhub.ReferenceHost && !strings.Contains(ref.Repository, "/") {
 		ref.Repository = "library/" + ref.Repository
 	}
 	if len(ref.Repository) > 255 {

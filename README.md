@@ -1,40 +1,47 @@
-# OCI Go modules
+# ohseeeye/oci
 
-This repository holds functionality related to OCI (Open Container Initiative).
+Go packages for building, serving, and composing OCI (Open Container Initiative) registries.
 
-The top-level package (`oci`) defines a [Go interface](./interface.go) that encapsulates the operations provided by an OCI registry — reading blobs and manifests, pushing content, listing tags, and more.
+The top-level package (`oci`) defines the [Registry interface](./interface.go) for reading blobs and manifests, pushing content, listing tags, and other registry operations.
 
-Full reference documentation can be found at [pkg.go.dev/github.com/docker/oci](https://pkg.go.dev/github.com/docker/oci).
+Full reference documentation can be found at [pkg.go.dev/github.com/ohseeeye/oci](https://pkg.go.dev/github.com/ohseeeye/oci).
 
 The aim is to provide an ergonomic interface for defining and layering OCI registry implementations.
 
-Although the API is fairly stable, it's still in v0 currently, so incompatible changes can't be ruled out.
+This project is in v0; breaking API and import-path changes are expected.
 
-The code was originally derived from [cue-labs/oci](https://github.com/cue-labs/oci) which was originally derived from
-the [go-containerregistry](https://pkg.go.dev/github.com/google/go-containerregistry/pkg/registry) package, but has
-considerably diverged since then.
+This project is an independent hard fork of [docker/oci](https://github.com/docker/oci).
+It is not intended as a drop-in replacement. Its history also includes
+[cue-labs/oci](https://github.com/cue-labs/oci) and
+[go-containerregistry](https://pkg.go.dev/github.com/google/go-containerregistry/pkg/registry).
 
 ## Purpose
 
-There are other libraries that exist for working with OCI registries, and they are great! However, as we look to invest 
-in Docker Hub and add new features ahead of them getting standardized into the OCI spec, we need a library that can be 
-used to interact with those features.
+The goal is to make registry implementations easy to build and compose through
+a shared interface. Backends can store content in memory or on disk, middleware
+can restrict or route operations, and HTTP adapters connect registries to the
+OCI distribution protocol.
+
+The library packages use only the Go standard library at runtime. External
+dependencies support tests, and `cmd/ocisrv` is a separate Go module.
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| `oci` | Core interface (`oci.Interface`) and types shared across all packages. |
-| `ociclient` | HTTP client that implements `oci.Interface` against a remote OCI registry. |
-| `ociserver` | HTTP server that serves the OCI distribution protocol on top of any `oci.Interface`. |
-| `ocimem` | Lightweight in-memory `oci.Interface` implementation, useful for testing and caching. |
-| `ocilayout` | Filesystem-backed `oci.Interface` implementation for OCI Image Layout directories, including shared and per-repository layouts. |
-| `ociauth` | Authentication transport implementing the Docker/OCI token flow, plus helpers for loading credentials from Docker config files. |
-| `ocifilter` | Wrappers that expose restricted or transformed views of a registry (read-only, immutable, namespace prefix, custom access control). |
-| `ociunify` | Combines two registries into a single unified `oci.Interface`, with configurable read policy. |
-| `ocilarge` | Parallel multi-range download (and upload) for large blobs, automatically tuning chunk size to available bandwidth. |
-| `ocidebug` | Registry wrapper that logs every operation — useful for tracing and debugging. |
-| `ociref` | Reference and digest parsing/validation utilities. |
+| `oci` | Core interface (`oci.Registry`) and types shared across all packages. |
+| `ociclient` | HTTP client that implements `oci.Registry` against a remote OCI registry. |
+| `ocilayout` | Filesystem-backed `oci.Registry` implementation for OCI Image Layout directories, including shared and per-repository layouts. |
+| `ocimem` | Lightweight in-memory `oci.Registry` implementation, useful for testing and caching. |
+| `ocimiddleware` | Registry wrappers for read-only and immutable views, namespace prefixes, access control, repository routing, and operation logging. |
+| `ociserver` | HTTP server that serves the OCI distribution protocol on top of any `oci.Registry`. |
+| `ocitransfer` | Streaming blob transfers through `oci.Reader` and `oci.Writer`, with adaptive parallel downloads and sequential chunked uploads. |
+| `ociunify` | Combines two registries into a single unified `oci.Registry`, with configurable read policy. |
+| `pkg/dockerhub` | Docker Hub hostnames for reference normalization, registry connections, and credential lookup. |
+| `pkg/mux` | General-purpose HTTP routing with path templates and middleware. |
+| `pkg/ociauth` | Authentication transport implementing the Docker/OCI token flow, plus helpers for loading credentials from Docker config files. |
+| `pkg/ocidigest` | OCI-compatible content digest calculation, validation, and streaming verification. |
+| `pkg/ociref` | OCI reference parsing, validation, and normalization. |
 
 The server currently passes the [OCI distribution conformance tests](https://pkg.go.dev/github.com/opencontainers/distribution-spec/conformance).
 
@@ -49,8 +56,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/docker/oci/ociauth"
-	"github.com/docker/oci/ociclient"
+	"github.com/ohseeeye/oci/ociclient"
+	"github.com/ohseeeye/oci/pkg/ociauth"
+	"github.com/ohseeeye/oci/pkg/dockerhub"
 )
 
 func main() {
@@ -59,7 +67,7 @@ func main() {
 		panic(err)
 	}
 
-	ocl, err := ociclient.New("index.docker.io", &ociclient.Options{
+	ocl, err := ociclient.New(dockerhub.ReferenceHost, &ociclient.Options{
 		Transport: ociauth.NewStdTransport(ociauth.StdTransportParams{
 			Config: cf,
 		}),
@@ -88,9 +96,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/docker/oci"
-	"github.com/docker/oci/ociauth"
-	"github.com/docker/oci/ociclient"
+	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/ociclient"
+	"github.com/ohseeeye/oci/pkg/ociauth"
+	"github.com/ohseeeye/oci/pkg/dockerhub"
 )
 
 func main() {
@@ -99,7 +108,7 @@ func main() {
 		panic(err)
 	}
 
-	ocl, err := ociclient.New("index.docker.io", &ociclient.Options{
+	ocl, err := ociclient.New(dockerhub.ReferenceHost, &ociclient.Options{
 		Transport: ociauth.NewStdTransport(ociauth.StdTransportParams{
 			Config: cf,
 		}),
@@ -108,7 +117,7 @@ func main() {
 		panic(err)
 	}
 
-	// Fetch the manifest for alpine:latest.
+	// Fetch the image index or manifest for alpine:latest.
 	r, err := ocl.GetTag(context.Background(), "library/alpine", "latest")
 	if err != nil {
 		panic(err)
@@ -122,7 +131,12 @@ func main() {
 	if err := json.NewDecoder(r).Decode(&manifest); err != nil {
 		panic(err)
 	}
-	fmt.Printf("config digest: %s\n", manifest.Config.Digest)
+	if manifest.Config != nil {
+		fmt.Printf("config digest: %s\n", manifest.Config.Digest)
+	}
+	for i, child := range manifest.Manifests {
+		fmt.Printf("manifest[%d]: %s (%d bytes)\n", i, child.Digest, child.Size)
+	}
 	for i, layer := range manifest.Layers {
 		fmt.Printf("layer[%d]: %s (%d bytes)\n", i, layer.Digest, layer.Size)
 	}
@@ -139,8 +153,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/docker/oci/ociauth"
-	"github.com/docker/oci/ociclient"
+	"github.com/ohseeeye/oci/ociclient"
+	"github.com/ohseeeye/oci/pkg/ociauth"
+	"github.com/ohseeeye/oci/pkg/dockerhub"
 )
 
 func main() {
@@ -149,7 +164,7 @@ func main() {
 		panic(err)
 	}
 
-	ocl, err := ociclient.New("index.docker.io", &ociclient.Options{
+	ocl, err := ociclient.New(dockerhub.ReferenceHost, &ociclient.Options{
 		Transport: ociauth.NewStdTransport(ociauth.StdTransportParams{
 			Config: cf,
 		}),
@@ -180,7 +195,22 @@ func main() {
 }
 ```
 
+### Transfer blobs
+
+See the [ocitransfer README](./ocitransfer/README.md) for streaming upload and
+parallel download examples using any `oci.Reader` or `oci.Writer`.
+
 ### Serve a local in-memory registry over HTTP
+
+The `ocisrv` command starts the same kind of in-memory registry for quick
+local testing. Content is held in memory and is lost when the process exits.
+It listens on `localhost:5000` by default; use `-listen` to choose another address.
+Run it from its module directory:
+
+```sh
+cd cmd/ocisrv
+go run . -listen localhost:5000
+```
 
 ```go
 package main
@@ -188,13 +218,40 @@ package main
 import (
 	"net/http"
 
-	"github.com/docker/oci/ocimem"
-	"github.com/docker/oci/ociserver"
+	"github.com/ohseeeye/oci/ocimem"
+	"github.com/ohseeeye/oci/ociserver"
 )
 
 func main() {
 	backend := ocimem.New()
-	handler := ociserver.New(backend, nil)
-	http.ListenAndServe(":5000", handler)
+	handler, err := ociserver.New(backend, nil)
+	if err != nil {
+		panic(err)
+	}
+	if err := http.ListenAndServe("localhost:5000", handler); err != nil {
+		panic(err)
+	}
 }
 ```
+
+## Testing
+
+Run the root module tests from the repository root:
+
+```sh
+go test ./...
+```
+
+The server command has its own `go.mod`, so test it separately:
+
+```sh
+(cd cmd/ocisrv && go test ./...)
+```
+
+Run the OCI distribution conformance tests with Docker installed and running:
+
+```sh
+go test -tags=integration ./conformance -count=1 -v
+```
+
+See [conformance/README.md](./conformance/README.md) for backend selection and reports.
