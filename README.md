@@ -35,13 +35,13 @@ dependencies support tests, and `cmd/ocisrv` is a separate Go module.
 | `ocimem` | Lightweight in-memory `oci.Registry` implementation, useful for testing and caching. |
 | `ocimiddleware` | Registry wrappers for read-only and immutable views, namespace prefixes, access control, repository routing, and operation logging. |
 | `ociserver` | HTTP server that serves the OCI distribution protocol on top of any `oci.Registry`. |
-| `ocitransfer` | Streaming blob transfers through `oci.Reader` and `oci.Writer`, with adaptive parallel downloads and sequential chunked uploads. |
 | `ociunify` | Combines two registries into a single unified `oci.Registry`, with configurable read policy. |
 | `pkg/dockerhub` | Docker Hub hostnames for reference normalization, registry connections, and credential lookup. |
 | `pkg/mux` | General-purpose HTTP routing with path templates and middleware. |
 | `pkg/ociauth` | Authentication transport implementing the Docker/OCI token flow, plus helpers for loading credentials from Docker config files. |
 | `pkg/ocidigest` | OCI-compatible content digest calculation, validation, and streaming verification. |
 | `pkg/ociref` | OCI reference parsing, validation, and normalization. |
+| `pkg/ocitransfer` | Streaming blob transfers through `oci.Reader` and `oci.Writer`, with adaptive parallel downloads and sequential chunked uploads. |
 
 The server currently passes the [OCI distribution conformance tests](https://pkg.go.dev/github.com/opencontainers/distribution-spec/conformance).
 
@@ -197,7 +197,7 @@ func main() {
 
 ### Transfer blobs
 
-See the [ocitransfer README](./ocitransfer/README.md) for streaming upload and
+See the [ocitransfer README](./pkg/ocitransfer/README.md) for streaming upload and
 parallel download examples using any `oci.Reader` or `oci.Writer`.
 
 ### Serve a local in-memory registry over HTTP
