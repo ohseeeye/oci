@@ -1,9 +1,10 @@
-//go:build integration
-
+// Package conformance runs the OCI distribution conformance suite against registries.
+// It is intended for integration tests and requires Docker.
 package conformance
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"fmt"
 	"net"
@@ -18,61 +19,44 @@ import (
 	"time"
 
 	"github.com/ohseeeye/oci"
-	"github.com/ohseeeye/oci/ocilayout"
-	"github.com/ohseeeye/oci/ocimem"
 	"github.com/ohseeeye/oci/ociserver"
 )
 
-const conformanceImage = "docker-oci-conformance:integration"
+const conformanceImage = "ohseeeye-oci-conformance:integration"
 
-type backendCase struct {
-	name string
-	new  func(*testing.T) oci.Registry
-}
+//go:embed assets/Dockerfile assets/oci-conformance.yaml
+var assets embed.FS
 
-func TestOCIConformance(t *testing.T) {
+// Run serves backend over HTTP and runs the pinned upstream suite against it.
+// name must contain lowercase letters, digits, dots, underscores, or hyphens,
+// beginning with a letter or digit. Reports are retained in a unique directory
+// for each run under results/name in the calling test's working directory.
+// Set OCI_CONFORMANCE_RESULTS to an absolute path to share a results directory
+// across packages or modules.
+// Call Run from an integration-tagged test. Short mode skips the suite.
+func Run(t *testing.T, name string, backend oci.Registry) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping OCI conformance tests in short mode")
 	}
-
-	root := repositoryRoot(t)
-	requireDocker(t, root)
-	buildConformanceImage(t, root)
-
-	backends := []backendCase{
-		{
-			name: "ocimem",
-			new: func(*testing.T) oci.Registry {
-				return ocimem.New()
-			},
-		},
-		{
-			name: "ocilayout",
-			new: func(t *testing.T) oci.Registry {
-				r, err := ocilayout.New(t.TempDir(), nil)
-				if err != nil {
-					t.Fatalf("creating ocilayout backend: %v", err)
-				}
-				return r
-			},
-		},
+	if err := validateName(name); err != nil {
+		t.Fatal(err)
 	}
-
-	for _, backend := range backends {
-		t.Run(backend.name, func(t *testing.T) {
-			runConformance(t, root, backend.name, backend.new(t))
-		})
+	assetsDir := t.TempDir()
+	if err := writeAssets(assetsDir); err != nil {
+		t.Fatalf("preparing conformance assets: %v", err)
 	}
-}
-
-func runConformance(t *testing.T, root, backendName string, backend oci.Registry) {
-	t.Helper()
+	requireDocker(t, assetsDir)
+	buildConformanceImage(t, assetsDir)
+	backendName := name
 
 	handler, err := ociserver.New(backend, nil)
 	if err != nil {
 		t.Fatalf("creating OCI server: %v", err)
 	}
-	listener, err := net.Listen("tcp4", "0.0.0.0:0")
+	// Docker must reach this test server through the host gateway.
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(t.Context(), "tcp4", "0.0.0.0:0") // #nosec G102 -- integration-only server reachable from Docker
 	if err != nil {
 		t.Fatalf("listening for OCI server: %v", err)
 	}
@@ -105,19 +89,17 @@ func runConformance(t *testing.T, root, backendName string, backend oci.Registry
 	port := listener.Addr().(*net.TCPAddr).Port
 	waitForRegistry(t, fmt.Sprintf("http://127.0.0.1:%d/v2/", port))
 
-	resultsDir := filepath.Join(root, "conformance", "results", backendName)
-	if err := os.RemoveAll(resultsDir); err != nil {
-		t.Fatalf("removing old conformance results: %v", err)
-	}
-	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+	resultsDir, err := createResultsDir(backendName)
+	if err != nil {
 		t.Fatalf("creating conformance results directory: %v", err)
 	}
+	t.Logf("OCI conformance reports: %s", resultsDir)
 
 	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
 	args := []string{
 		"run", "--rm",
 		"--add-host=host.docker.internal:host-gateway",
-		"-v", filepath.Join(root, "conformance", "oci-conformance.yaml") + ":/work/oci-conformance.yaml:ro",
+		"-v", filepath.Join(assetsDir, "oci-conformance.yaml") + ":/work/oci-conformance.yaml:ro",
 		"-v", resultsDir + ":/results",
 		"-e", fmt.Sprintf("OCI_REGISTRY=host.docker.internal:%d", port),
 		"-e", "OCI_REPO1=conformance/" + backendName + "/" + runID + "/repo1",
@@ -130,24 +112,61 @@ func runConformance(t *testing.T, root, backendName string, backend oci.Registry
 
 	runCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	output, err := runCommand(runCtx, root, "docker", args...)
+	output, err := runCommand(runCtx, assetsDir, "docker", args...)
 	t.Logf("OCI conformance output for %s:\n%s", backendName, output)
 	if err != nil {
 		t.Fatalf("OCI conformance failed for %s: %v; reports: %s", backendName, err, resultsDir)
 	}
 }
 
-func repositoryRoot(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getting working directory: %v", err)
+func validateName(name string) error {
+	for i, ch := range name {
+		if ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' {
+			continue
+		}
+		if i > 0 && (ch == '.' || ch == '_' || ch == '-') {
+			continue
+		}
+		return fmt.Errorf("invalid conformance backend name %q", name)
 	}
-	root, err := filepath.Abs(filepath.Join(wd, ".."))
-	if err != nil {
-		t.Fatalf("resolving repository root: %v", err)
+	if name == "" {
+		return fmt.Errorf("conformance backend name must not be empty")
 	}
-	return root
+	return nil
+}
+
+func writeAssets(dir string) error {
+	for _, name := range []string{"Dockerfile", "oci-conformance.yaml"} {
+		data, err := assets.ReadFile("assets/" + name)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createResultsDir(name string) (string, error) {
+	if err := validateName(name); err != nil {
+		return "", err
+	}
+	resultsRoot := os.Getenv("OCI_CONFORMANCE_RESULTS")
+	if resultsRoot == "" {
+		resultsRoot = "results"
+	} else if !filepath.IsAbs(resultsRoot) {
+		return "", fmt.Errorf("OCI_CONFORMANCE_RESULTS must be an absolute path")
+	}
+	base, err := filepath.Abs(filepath.Join(resultsRoot, name))
+	if err != nil {
+		return "", err
+	}
+	// The test runner chooses the output root; backend names are validated above.
+	if err := os.MkdirAll(base, 0o750); err != nil { // #nosec G703 -- trusted test configuration, not registry input
+		return "", err
+	}
+	return os.MkdirTemp(base, "run-")
 }
 
 func requireDocker(t *testing.T, root string) {
@@ -162,9 +181,9 @@ func buildConformanceImage(t *testing.T, root string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	output, err := runCommand(ctx, root, "docker", "build",
-		"-f", "conformance/Dockerfile",
+		"-f", "Dockerfile",
 		"-t", conformanceImage,
-		"conformance/",
+		".",
 	)
 	if err != nil {
 		t.Fatalf("building OCI conformance image: %v\n%s", err, output)
@@ -174,10 +193,14 @@ func buildConformanceImage(t *testing.T, root string) {
 func waitForRegistry(t *testing.T, registryURL string) {
 	t.Helper()
 	client := &http.Client{Timeout: time.Second}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, registryURL, nil)
+	if err != nil {
+		t.Fatalf("creating registry readiness request: %v", err)
+	}
 	deadline := time.Now().Add(30 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(registryURL)
+		resp, err := client.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {

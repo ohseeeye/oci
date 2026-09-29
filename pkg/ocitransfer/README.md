@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/ohseeeye/oci/ocimem"
-	"github.com/ohseeeye/oci/ocitransfer"
+	"github.com/ohseeeye/oci/pkg/ocitransfer"
 )
 
 func main() {

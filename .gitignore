@@ -1,3 +1,4 @@
 .idea
 ocisrv
-/conformance/results/
+# Generated conformance reports (including tests in nested backend modules).
+**/results/
