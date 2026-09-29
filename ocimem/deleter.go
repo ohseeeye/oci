@@ -83,12 +83,14 @@ func (r *Registry) DeleteTag(ctx context.Context, repoName string, tagName strin
 	if err != nil {
 		return err
 	}
-	if _, ok := repo.tags[tagName]; !ok {
+	desc, ok := repo.tags[tagName]
+	if !ok {
 		return fmt.Errorf("%w: tag does not exist", oci.ErrManifestUnknown)
 	}
 	if r.cfg.ImmutableTags {
 		return errCannotDeleteTag
 	}
 	delete(repo.tags, tagName)
+	repo.recordTagEvent(tagName, desc, oci.TagHistoryEventDeleted)
 	return nil
 }

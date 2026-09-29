@@ -60,6 +60,7 @@ type perRepositoryRegistry struct {
 }
 
 var _ oci.Registry = (*perRepositoryRegistry)(nil)
+var _ oci.TagHistory = (*perRepositoryRegistry)(nil)
 
 type repoLayout struct {
 	raw oci.Registry
@@ -227,6 +228,22 @@ func (r *perRepositoryRegistry) Referrers(ctx context.Context, repo string, dige
 		return oci.ErrorSeq[oci.Descriptor](err)
 	}
 	return layout.Referrers(ctx, ".", digest, params)
+}
+
+// TagHistory reads the history from the repository's underlying layout.
+func (r *perRepositoryRegistry) TagHistory(ctx context.Context, repo, tag string, params *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+	if err := contextErr(ctx); err != nil {
+		return oci.ErrorSeq[oci.Descriptor](err)
+	}
+	layout, err := r.openRepoLayout(repo)
+	if err != nil {
+		return oci.ErrorSeq[oci.Descriptor](err)
+	}
+	history, ok := layout.raw.(oci.TagHistory)
+	if !ok {
+		return oci.ErrorSeq[oci.Descriptor](oci.ErrUnsupported)
+	}
+	return history.TagHistory(ctx, repo, tag, params)
 }
 
 func (r *perRepositoryRegistry) layoutForRepo(repo string) (oci.Registry, error) {

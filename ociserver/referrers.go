@@ -12,7 +12,7 @@ import (
 	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
-func marshalReferrersResponse(descs []oci.Descriptor) ([]byte, error) {
+func marshalIndexResponse(descs []oci.Descriptor) ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"schemaVersion": 2,
 		"mediaType":     oci.MediaTypeImageIndex,
@@ -39,7 +39,7 @@ func (s *Server) referrersGet() http.HandlerFunc {
 		descs, err := oci.All(descSeq)
 		if err != nil {
 			if errors.Is(err, oci.ErrManifestUnknown) || errors.Is(err, oci.ErrNameUnknown) {
-				body, encErr := marshalReferrersResponse([]oci.Descriptor{})
+				body, encErr := marshalIndexResponse([]oci.Descriptor{})
 				if encErr != nil {
 					s.logError(r.Context(), "encoding empty referrers response", encErr, "repository", name, "digest", dgst, "artifactType", artifactType)
 					returnError(w, ErrServerError())
@@ -62,7 +62,7 @@ func (s *Server) referrersGet() http.HandlerFunc {
 		if descs == nil {
 			descs = []oci.Descriptor{}
 		}
-		body, err := marshalReferrersResponse(descs)
+		body, err := marshalIndexResponse(descs)
 		if err != nil {
 			s.logError(r.Context(), "encoding referrers response", err, "repository", name, "digest", dgst, "artifactType", artifactType)
 			returnError(w, ErrServerError())
