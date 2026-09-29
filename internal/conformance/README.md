@@ -19,6 +19,9 @@ reports a conformance failure. HTML, YAML, and JUnit reports are written under
 `results/<backend>/run-*/` at the repository root when using the tasks above.
 Previous reports are retained.
 
+The pull-request workflow also runs both backend conformance tests as a
+separate `OCI conformance` check, using the same shared results location.
+
 ## Testing another backend or module
 
 The reusable harness lives in `internal/conformance`. It embeds the pinned
