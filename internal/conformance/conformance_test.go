@@ -42,6 +42,7 @@ func TestWriteAssets(t *testing.T) {
 }
 
 func TestCreateResultsDir(t *testing.T) {
+	t.Setenv("OCI_CONFORMANCE_RESULTS", "")
 	dir := t.TempDir()
 	t.Chdir(dir)
 	first, err := createResultsDir("ocisqlite")
@@ -67,5 +68,28 @@ func TestCreateResultsDir(t *testing.T) {
 	}
 	if _, err := createResultsDir("../escape"); err == nil {
 		t.Fatal("unsafe backend name unexpectedly accepted")
+	}
+}
+
+func TestSharedResultsDir(t *testing.T) {
+	shared := t.TempDir()
+	t.Setenv("OCI_CONFORMANCE_RESULTS", shared)
+	for _, name := range []string{"ocimem", "ocilayout"} {
+		// Simulate callers running from different packages or modules.
+		t.Chdir(t.TempDir())
+		dir, err := createResultsDir(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Dir(dir) != filepath.Join(shared, name) {
+			t.Fatalf("unexpected shared report directory: %s", dir)
+		}
+	}
+}
+
+func TestRelativeSharedResultsDir(t *testing.T) {
+	t.Setenv("OCI_CONFORMANCE_RESULTS", "relative/results")
+	if _, err := createResultsDir("ocimem"); err == nil {
+		t.Fatal("relative shared results directory unexpectedly accepted")
 	}
 }

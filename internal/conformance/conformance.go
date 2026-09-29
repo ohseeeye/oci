@@ -29,8 +29,10 @@ var assets embed.FS
 
 // Run serves backend over HTTP and runs the pinned upstream suite against it.
 // name must contain lowercase letters, digits, dots, underscores, or hyphens,
-// beginning with a letter or digit. Reports are retained in results/name under
-// the calling test's working directory, in a unique directory for each run.
+// beginning with a letter or digit. Reports are retained in a unique directory
+// for each run under results/name in the calling test's working directory.
+// Set OCI_CONFORMANCE_RESULTS to an absolute path to share a results directory
+// across packages or modules.
 // Call Run from an integration-tagged test. Short mode skips the suite.
 func Run(t *testing.T, name string, backend oci.Registry) {
 	t.Helper()
@@ -150,11 +152,18 @@ func createResultsDir(name string) (string, error) {
 	if err := validateName(name); err != nil {
 		return "", err
 	}
-	base, err := filepath.Abs(filepath.Join("results", name))
+	resultsRoot := os.Getenv("OCI_CONFORMANCE_RESULTS")
+	if resultsRoot == "" {
+		resultsRoot = "results"
+	} else if !filepath.IsAbs(resultsRoot) {
+		return "", fmt.Errorf("OCI_CONFORMANCE_RESULTS must be an absolute path")
+	}
+	base, err := filepath.Abs(filepath.Join(resultsRoot, name))
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(base, 0o750); err != nil {
+	// The test runner chooses the output root; backend names are validated above.
+	if err := os.MkdirAll(base, 0o750); err != nil { // #nosec G703 -- trusted test configuration, not registry input
 		return "", err
 	}
 	return os.MkdirTemp(base, "run-")

@@ -1,7 +1,8 @@
 # OCI distribution conformance
 
-This directory runs the official OCI distribution-spec conformance suite
-against `ociserver` backed by the registry implementations in this repository.
+Each backend owns an integration-tagged `TestOCIConformance` in its package.
+This directory provides the shared runner for the official OCI distribution-spec
+suite, which tests that backend through `ociserver`.
 
 Docker must be installed and running. Run every backend with:
 
@@ -15,7 +16,8 @@ Individual backends can be selected with `task conformance:ocimem` or
 The harness builds a pinned version of the upstream conformance runner, starts
 each registry on a temporary local port, and fails when the upstream runner
 reports a conformance failure. HTML, YAML, and JUnit reports are written under
-`conformance/results/<backend>/run-*/`. Previous reports are retained.
+`results/<backend>/run-*/` at the repository root when using the tasks above.
+Previous reports are retained.
 
 ## Testing another backend or module
 
@@ -53,8 +55,16 @@ checkout. SQLite dependencies remain in that nested module.
 
 Run `go test -tags=integration -count=1 -v ./...` from the backend module.
 Reports are written to `results/<backend>/run-*/` under the calling test package's
-working directory, and their absolute path is logged. Docker must be able to
-mount that directory and the temporary runner assets.
+working directory by default, and their absolute path is logged. Set
+`OCI_CONFORMANCE_RESULTS` to an absolute directory to collect reports from
+multiple packages or modules in one location. The Taskfile targets set this to
+the repository's `results/` directory. For example, from the repository root:
+
+```sh
+OCI_CONFORMANCE_RESULTS="$PWD/results" go test -tags=integration ./ocimem ./ocilayout -run TestOCIConformance -count=1 -v
+```
+
+Docker must be able to mount the results directory and temporary runner assets.
 
 The existing `task conformance` targets run the root-module backends. When a
 nested backend is added, add a task that runs its module's integration tests and

@@ -251,7 +251,7 @@ The server command has its own `go.mod`, so test it separately:
 Run the OCI distribution conformance tests with Docker installed and running:
 
 ```sh
-go test -tags=integration ./conformance -count=1 -v
+task conformance
 ```
 
-See [conformance/README.md](./conformance/README.md) for backend selection and reports.
+See [internal/conformance/README.md](./internal/conformance/README.md) for backend selection, direct Go commands, and shared reports.
