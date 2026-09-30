@@ -128,6 +128,11 @@ func (s *Server) addRoutes() {
 
 		// referrers
 		r.Get("/*name/referrers/:digest", s.referrersGet())
+
+		// Experimental endpoints are registered only when the backend supports them.
+		if history, ok := s.db.(oci.TagHistory); ok {
+			r.Get("/*name/_oci/tag-history/:tag", s.tagHistoryGet(history))
+		}
 	})
 	s.mux = r
 }

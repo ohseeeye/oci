@@ -9,6 +9,14 @@ server. It stores manifests in `index.json`, blobs under `blobs/`, and records
 named references with the standard `org.opencontainers.image.ref.name`
 annotation.
 
+The experimental `oci.TagHistory` capability stores assignment and deletion
+events in a custom top-level `index.json` annotation. This keeps current tags
+and their history in one atomic index update, and history survives reopening or
+deleting the tag. Other OCI layout tools can ignore the annotation, but tools
+that rewrite or strip it will lose the history. Because the full event log is
+embedded in the annotation, `index.json` grows as tags change; this is a
+prototype storage format, not a scalable long-term history store.
+
 ## Shared Layout
 
 `New` opens a single OCI layout directory that can hold multiple repositories.

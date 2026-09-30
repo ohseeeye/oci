@@ -186,6 +186,7 @@ func (r *Registry) PushManifest(ctx context.Context, repoName string, data []byt
 	}
 	for _, tag := range tags {
 		repo.tags[tag] = desc
+		repo.recordTagEvent(tag, desc, oci.TagHistoryEventCreated)
 	}
 	return desc, nil
 }

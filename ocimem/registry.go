@@ -25,8 +25,9 @@ import (
 )
 
 var _ oci.Registry = (*Registry)(nil)
+var _ oci.TagHistory = (*Registry)(nil)
 
-// Registry is an in-memory implementation of [oci.Registry].
+// Registry is an in-memory implementation of [oci.Registry] and [oci.TagHistory].
 type Registry struct {
 	*oci.Funcs
 	cfg   Config
@@ -35,10 +36,11 @@ type Registry struct {
 }
 
 type repository struct {
-	tags      map[string]oci.Descriptor
-	manifests map[oci.Digest]*blob
-	blobs     map[oci.Digest]*blob
-	uploads   map[string]*Buffer
+	tags       map[string]oci.Descriptor
+	tagHistory map[string][]tagHistoryEntry
+	manifests  map[oci.Digest]*blob
+	blobs      map[oci.Digest]*blob
+	uploads    map[string]*Buffer
 }
 
 type blob struct {
@@ -141,10 +143,11 @@ func (r *Registry) makeRepo(repoName string) (*repository, error) {
 		return repo, nil
 	}
 	repo := &repository{
-		tags:      make(map[string]oci.Descriptor),
-		manifests: make(map[oci.Digest]*blob),
-		blobs:     make(map[oci.Digest]*blob),
-		uploads:   make(map[string]*Buffer),
+		tags:       make(map[string]oci.Descriptor),
+		tagHistory: make(map[string][]tagHistoryEntry),
+		manifests:  make(map[oci.Digest]*blob),
+		blobs:      make(map[oci.Digest]*blob),
+		uploads:    make(map[string]*Buffer),
 	}
 	r.repos[repoName] = repo
 	return repo, nil

@@ -17,6 +17,7 @@ package ocilayout
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/ohseeeye/oci"
 )
@@ -81,10 +82,12 @@ func (r *Registry) DeleteTag(ctx context.Context, repo string, tagName string) e
 	if err != nil {
 		return err
 	}
-	if _, err := r.tagDescriptor(st, repo, tagName); err != nil {
+	desc, err := r.tagDescriptor(st, repo, tagName)
+	if err != nil {
 		return err
 	}
-	out := st.index.Manifests[:0]
+	next := st.index
+	out := make([]oci.Descriptor, 0, len(st.index.Manifests))
 	for _, desc := range st.index.Manifests {
 		match, err := r.refDescriptorMatches(repo, tagName, "", desc)
 		if err != nil {
@@ -95,8 +98,15 @@ func (r *Registry) DeleteTag(ctx context.Context, repo string, tagName string) e
 		}
 		out = append(out, desc)
 	}
-	st.index.Manifests = out
-	return saveIndex(st.dir, st.index)
+	next.Manifests = slices.Clip(out)
+	if err := recordTagHistory(&next, repo, []string{tagName}, desc, oci.TagHistoryEventDeleted); err != nil {
+		return err
+	}
+	if err := saveIndex(st.dir, next); err != nil {
+		return err
+	}
+	st.index = next
+	return nil
 }
 
 func (r *Registry) refDescriptorMatches(repo string, tag string, digest oci.Digest, desc oci.Descriptor) (bool, error) {

@@ -43,6 +43,12 @@ dependencies support tests, and `cmd/ocisrv` is a separate Go module.
 | `pkg/ociref` | OCI reference parsing, validation, and normalization. |
 | `pkg/ocitransfer` | Streaming blob transfers through `oci.Reader` and `oci.Writer`, with adaptive parallel downloads and sequential chunked uploads. |
 
+`oci.TagHistory` is a separate, experimental capability that callers can check
+with a type assertion on an `oci.Registry`. `ocimem` and `ocilayout` implement it,
+and `ociserver` serves the proposed tag-history endpoint when its backend does.
+`ociclient` implements the same capability against remote registries; an
+upstream 404 reports `oci.ErrUnsupported`.
+
 The server currently passes the [OCI distribution conformance tests](https://pkg.go.dev/github.com/opencontainers/distribution-spec/conformance).
 
 ## Usage

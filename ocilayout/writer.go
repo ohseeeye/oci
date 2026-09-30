@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/ohseeeye/oci"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
@@ -161,16 +162,23 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	if _, err := writeBlobBytes(st.dir, desc, data); err != nil {
 		return oci.Descriptor{}, err
 	}
+	// Update references and history together in the single index.json write.
+	next := *st
+	next.index.Manifests = slices.Clone(st.index.Manifests)
 	if len(tags) == 0 {
-		r.upsertManifestRef(st, repo, "", desc)
+		r.upsertManifestRef(&next, repo, "", desc)
 	} else {
 		for _, tag := range tags {
-			r.upsertManifestRef(st, repo, tag, desc)
+			r.upsertManifestRef(&next, repo, tag, desc)
 		}
 	}
-	if err := saveIndex(st.dir, st.index); err != nil {
+	if err := recordTagHistory(&next.index, repo, tags, desc, oci.TagHistoryEventCreated); err != nil {
 		return oci.Descriptor{}, err
 	}
+	if err := saveIndex(st.dir, next.index); err != nil {
+		return oci.Descriptor{}, err
+	}
+	st.index = next.index
 	return desc, nil
 }
 

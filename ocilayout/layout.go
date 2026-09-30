@@ -42,7 +42,8 @@ type Options struct {
 	DefaultRepo string
 }
 
-// Registry is an OCI Image Layout backed implementation of [oci.Registry].
+// Registry is an OCI Image Layout backed implementation of [oci.Registry]
+// and the experimental [oci.TagHistory] capability.
 type Registry struct {
 	*oci.Funcs
 	mu    sync.Mutex
@@ -52,6 +53,7 @@ type Registry struct {
 }
 
 var _ oci.Registry = (*Registry)(nil)
+var _ oci.TagHistory = (*Registry)(nil)
 
 type layoutState struct {
 	dir   string
