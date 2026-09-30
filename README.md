@@ -22,8 +22,9 @@ a shared interface. Backends can store content in memory or on disk, middleware
 can restrict or route operations, and HTTP adapters connect registries to the
 OCI distribution protocol.
 
-The library packages use only the Go standard library at runtime. External
-dependencies support tests, and `cmd/ocisrv` is a separate Go module.
+The core module's library packages use only the Go standard library at runtime.
+`ocisqlite` is a separate Go module with a SQLite dependency; `cmd/ocisrv` also
+has its own module. External dependencies in the core module support tests.
 
 ## Packages
 
@@ -32,6 +33,7 @@ dependencies support tests, and `cmd/ocisrv` is a separate Go module.
 | `oci` | Core interface (`oci.Registry`) and types shared across all packages. |
 | `ociclient` | HTTP client that implements `oci.Registry` against a remote OCI registry. |
 | `ocilayout` | Filesystem-backed `oci.Registry` implementation for OCI Image Layout directories, including shared and per-repository layouts. |
+| [`ocisqlite`](./ocisqlite/README.md) | Persistent registry with SQLite metadata and shared blob files; a separate Go module. |
 | `ocimem` | Lightweight in-memory `oci.Registry` implementation, useful for testing and caching. |
 | `ocimiddleware` | Registry wrappers for read-only and immutable views, namespace prefixes, access control, repository routing, and operation logging. |
 | `ociserver` | HTTP server that serves the OCI distribution protocol on top of any `oci.Registry`. |
@@ -44,7 +46,7 @@ dependencies support tests, and `cmd/ocisrv` is a separate Go module.
 | `pkg/ocitransfer` | Streaming blob transfers through `oci.Reader` and `oci.Writer`, with adaptive parallel downloads and sequential chunked uploads. |
 
 `oci.TagHistory` is a separate, experimental capability that callers can check
-with a type assertion on an `oci.Registry`. `ocimem` and `ocilayout` implement it,
+with a type assertion on an `oci.Registry`. `ocimem`, `ocilayout`, and `ocisqlite` implement it,
 and `ociserver` serves the proposed tag-history endpoint when its backend does.
 `ociclient` implements the same capability against remote registries; an
 upstream 404 reports `oci.ErrUnsupported`.
@@ -248,11 +250,14 @@ Run the root module tests from the repository root:
 go test ./...
 ```
 
-The server command has its own `go.mod`, so test it separately:
+The SQLite backend and server command have their own `go.mod`, so test them separately:
 
 ```sh
+(cd ocisqlite && go test ./...)
 (cd cmd/ocisrv && go test ./...)
 ```
+
+`task test` and `task lint` include both the core and SQLite modules.
 
 Run the OCI distribution conformance tests with Docker installed and running:
 
