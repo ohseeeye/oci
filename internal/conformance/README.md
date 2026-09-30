@@ -10,8 +10,8 @@ Docker must be installed and running. Run every backend with:
 task conformance
 ```
 
-Individual backends can be selected with `task conformance:ocimem` or
-`task conformance:ocilayout`.
+Individual backends can be selected with `task conformance:ocimem`,
+`task conformance:ocilayout`, or `task conformance:ocisqlite`.
 
 The harness builds a pinned version of the upstream conformance runner, starts
 each registry on a temporary local port, and fails when the upstream runner
@@ -19,7 +19,7 @@ reports a conformance failure. HTML, YAML, and JUnit reports are written under
 `results/<backend>/run-*/` at the repository root when using the tasks above.
 Previous reports are retained.
 
-The pull-request workflow also runs both backend conformance tests as a
+The pull-request workflow also runs all backend conformance tests as a
 separate `OCI conformance` check, using the same shared results location.
 
 ## Testing another backend or module
@@ -29,7 +29,8 @@ Dockerfile and configuration, so callers do not need to locate the root checkout
 or copy runner assets. Its Go dependencies are the standard library and this
 module's core registry/server packages, not individual storage backends.
 
-In a future `github.com/ohseeeye/oci/ocisqlite` module, an integration test can use:
+The `github.com/ohseeeye/oci/ocisqlite` module uses this runner from its
+integration test. Another module can use the same pattern:
 
 ```go
 //go:build integration
@@ -69,6 +70,7 @@ OCI_CONFORMANCE_RESULTS="$PWD/results" go test -tags=integration ./ocimem ./ocil
 
 Docker must be able to mount the results directory and temporary runner assets.
 
-The existing `task conformance` targets run the root-module backends. When a
-nested backend is added, add a task that runs its module's integration tests and
-include it in the aggregate target; Go's `./...` does not cross module boundaries.
+`task conformance` runs the root-module backends and the nested SQLite module.
+For each additional nested backend, add a task that runs its module's integration
+tests and include it in the aggregate target; Go's `./...` does not cross module
+boundaries.

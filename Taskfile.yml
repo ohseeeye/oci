@@ -13,32 +13,40 @@ tasks:
     dir: .
     cmds:
       - go test ./...
+      - task: test:ocisqlite
+
+  test:ocisqlite:
+    desc: Run the SQLite module tests
+    dir: '{{.ROOT_DIR}}/ocisqlite'
+    cmd: go test ./...
 
   lint:
     desc: Run golangci-lint inside a Docker container
     dir: .
     cmds:
-      - >-
-        docker run --rm
-        -v {{.ROOT_DIR}}:/workspace
-        -w /workspace
-        -e GOFLAGS=-buildvcs=false
-        -e GOLANGCI_LINT_CACHE=/tmp/.golangci-lint-cache
-        {{.LINT_IMAGE}}
-        golangci-lint run ./...
+      - for: [".", "ocisqlite"]
+        cmd: >-
+          docker run --rm
+          -v {{.ROOT_DIR}}:/workspace
+          -w /workspace/{{.ITEM}}
+          -e GOFLAGS=-buildvcs=false
+          -e GOLANGCI_LINT_CACHE=/tmp/.golangci-lint-cache
+          {{.LINT_IMAGE}}
+          golangci-lint run ./...
 
   lint:fix:
     desc: Run golangci-lint with auto-fix inside a Docker container
     dir: .
     cmds:
-      - >-
-        docker run --rm
-        -v {{.ROOT_DIR}}:/workspace
-        -w /workspace
-        -e GOFLAGS=-buildvcs=false
-        -e GOLANGCI_LINT_CACHE=/tmp/.golangci-lint-cache
-        {{.LINT_IMAGE}}
-        golangci-lint run --fix ./...
+      - for: [".", "ocisqlite"]
+        cmd: >-
+          docker run --rm
+          -v {{.ROOT_DIR}}:/workspace
+          -w /workspace/{{.ITEM}}
+          -e GOFLAGS=-buildvcs=false
+          -e GOLANGCI_LINT_CACHE=/tmp/.golangci-lint-cache
+          {{.LINT_IMAGE}}
+          golangci-lint run --fix ./...
 
   check:
     desc: Run all checks (lint + test)
@@ -51,7 +59,9 @@ tasks:
     dir: '{{.ROOT_DIR}}'
     env:
       OCI_CONFORMANCE_RESULTS: '{{.ROOT_DIR}}/results'
-    cmd: go test -tags=integration ./ocimem ./ocilayout -run TestOCIConformance -count=1 -v
+    cmds:
+      - go test -tags=integration ./ocimem ./ocilayout -run TestOCIConformance -count=1 -v
+      - task: conformance:ocisqlite
 
   conformance:ocimem:
     desc: Run OCI distribution conformance tests against ocimem
@@ -66,3 +76,10 @@ tasks:
     env:
       OCI_CONFORMANCE_RESULTS: '{{.ROOT_DIR}}/results'
     cmd: go test -tags=integration ./ocilayout -run TestOCIConformance -count=1 -v
+
+  conformance:ocisqlite:
+    desc: Run OCI distribution conformance tests against ocisqlite
+    dir: '{{.ROOT_DIR}}/ocisqlite'
+    env:
+      OCI_CONFORMANCE_RESULTS: '{{.ROOT_DIR}}/results'
+    cmd: go test -tags=integration ./... -run TestOCIConformance -count=1 -v
