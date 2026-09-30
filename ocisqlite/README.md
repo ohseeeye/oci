@@ -9,6 +9,17 @@ This directory is a separate Go module so the core OCI module does not acquire
 a SQLite runtime dependency. Its local `replace` directive uses the core module
 in the parent directory during development.
 
+The release workflow tags this module with `ocisqlite/vX.Y.Z`, separately from
+the core module's `vX.Y.Z` tags. SQLite is tagged on pushes to `main` only when
+the push changes files under `ocisqlite/`. It uses the same patch default and
+`(MINOR)` / `(MAJOR)` commit-message tokens as the core module. The first
+SQLite release defaults to `ocisqlite/v0.0.1`. Consumers request its version
+without the directory prefix:
+
+```sh
+go get github.com/ohseeeye/oci/ocisqlite@v0.0.1
+```
+
 ```go
 backend, err := ocisqlite.New("./registry", nil)
 if err != nil {

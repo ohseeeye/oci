@@ -19,13 +19,45 @@ jobs:
         with:
           fetch-depth: "0"
 
-      - name: Bump version and push tag
+      - name: Check for ocisqlite changes
+        id: sqlite_changes
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          before="$BEFORE"
+          if [[ "$before" == "0000000000000000000000000000000000000000" ]]; then
+            before=$(git mktree < /dev/null)
+          fi
+          files=$(git diff --name-only "$before" "$AFTER" -- ocisqlite/)
+          changed=false
+          if [[ -n "$files" ]]; then
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Bump core version and push tag
         uses: anothrNick/github-tag-action@4ed44965e0db8dab2b466a16da04aec3cc312fd8 # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEFAULT_BUMP: patch
           INITIAL_VERSION: 0.0.1
           TAG_PREFIX: v
+          MAJOR_STRING_TOKEN: (MAJOR)
+          MINOR_STRING_TOKEN: (MINOR)
+          BRANCH_HISTORY: compare
+
+      # Go modules below the repository root require directory-prefixed tags.
+      # Only release SQLite when this push changes its directory.
+      - name: Bump ocisqlite version and push tag
+        if: steps.sqlite_changes.outputs.changed == 'true'
+        uses: anothrNick/github-tag-action@4ed44965e0db8dab2b466a16da04aec3cc312fd8 # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: patch
+          # The action bumps this starting version, yielding v0.0.1 first.
+          INITIAL_VERSION: 0.0.0
+          TAG_PREFIX: ocisqlite/v
           MAJOR_STRING_TOKEN: (MAJOR)
           MINOR_STRING_TOKEN: (MINOR)
           BRANCH_HISTORY: compare
