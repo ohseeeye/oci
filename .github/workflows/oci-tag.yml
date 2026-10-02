@@ -47,6 +47,35 @@ jobs:
           MINOR_STRING_TOKEN: (MINOR)
           BRANCH_HISTORY: compare
 
+      - name: Check for ocis3 changes
+        id: s3_changes
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          before="$BEFORE"
+          if [[ "$before" == "0000000000000000000000000000000000000000" ]]; then
+            before=$(git mktree < /dev/null)
+          fi
+          files=$(git diff --name-only "$before" "$AFTER" -- ocis3/)
+          changed=false
+          if [[ -n "$files" ]]; then
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Bump ocis3 version and push tag
+        if: steps.s3_changes.outputs.changed == 'true'
+        uses: anothrNick/github-tag-action@4ed44965e0db8dab2b466a16da04aec3cc312fd8 # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: patch
+          INITIAL_VERSION: 0.0.0
+          TAG_PREFIX: ocis3/v
+          MAJOR_STRING_TOKEN: (MAJOR)
+          MINOR_STRING_TOKEN: (MINOR)
+          BRANCH_HISTORY: compare
+
       # Go modules below the repository root require directory-prefixed tags.
       # Only release SQLite when this push changes its directory.
       - name: Bump ocisqlite version and push tag
