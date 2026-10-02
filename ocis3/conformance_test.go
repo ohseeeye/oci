@@ -4,7 +4,6 @@ package ocis3
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -15,6 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/ohseeeye/oci/internal/conformance"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/stretchr/testify/require"
 )
 
 const minioImage = "chainguard/minio@sha256:9dcc028b309030afa86fc1fc8d93907ae373ea3fb75277cca3fc77e4645932b7"
@@ -99,7 +100,23 @@ func TestS3Integration(t *testing.T) {
 		br, err := r.GetBlobRange(t.Context(), "large", blob.Digest, int64(r.partSize-3), -1)
 		got := readContent(t, br, err)
 		if string(got) != strings.Repeat("x", 20) {
-			t.Fatal(fmt.Sprintf("range across multipart boundary: %d bytes", len(got)))
+			t.Fatalf("range across multipart boundary: %d bytes", len(got))
 		}
+	})
+	t.Run("resumed multipart upload", func(t *testing.T) {
+		data := []byte(strings.Repeat("y", r.partSize+19))
+		w, err := r.PushBlobChunked(t.Context(), "large", 0)
+		require.NoError(t, err)
+		_, err = w.Write(data[:r.partSize-7])
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+		w, err = other.PushBlobChunkedResume(t.Context(), "large", w.ID(), -1, 0)
+		require.NoError(t, err)
+		_, err = w.Write(data[r.partSize-7:])
+		require.NoError(t, err)
+		desc, err := w.Commit(digestBytes(t, data, ocidigest.SHA512))
+		require.NoError(t, err)
+		br, err := r.GetBlob(t.Context(), "large", desc.Digest)
+		require.Equal(t, data, readContent(t, br, err))
 	})
 }

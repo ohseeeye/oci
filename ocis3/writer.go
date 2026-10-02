@@ -26,17 +26,27 @@ func (r *Registry) PushBlob(ctx context.Context, repo string, desc oci.Descripto
 	if desc.Size < 0 {
 		return oci.Descriptor{}, oci.ErrSizeInvalid
 	}
-	key, err := r.blobKey(desc.Digest)
-	if err != nil {
+	if _, err := r.blobKey(desc.Digest); err != nil {
 		return oci.Descriptor{}, err
 	}
 	dw, err := ocidigest.NewWriter(nil, desc.Digest.Algorithm())
 	if err != nil {
 		return oci.Descriptor{}, err
 	}
+	return r.storeBlob(ctx, repo, desc, content, dw)
+}
+
+// storeBlob assembles and publishes content. A nil digester is only used for
+// immutable upload chunks whose digest was verified from committed hash state.
+func (r *Registry) storeBlob(ctx context.Context, repo string, desc oci.Descriptor, content io.Reader, dw *ocidigest.Writer) (oci.Descriptor, error) {
+	key, err := r.blobKey(desc.Digest)
+	if err != nil {
+		return oci.Descriptor{}, err
+	}
 	buf := make([]byte, r.partSize)
 	var uploadID string
 	var parts []types.CompletedPart
+	var size int64
 	defer func() {
 		if uploadID != "" {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -51,11 +61,14 @@ func (r *Registry) PushBlob(ctx context.Context, repo string, desc oci.Descripto
 			return oci.Descriptor{}, readErr
 		}
 		if n > 0 {
-			if _, err := dw.Write(buf[:n]); err != nil {
-				return oci.Descriptor{}, err
-			}
-			if dw.Size() > desc.Size {
+			if int64(n) > desc.Size-size {
 				return oci.Descriptor{}, oci.ErrSizeInvalid
+			}
+			size += int64(n)
+			if dw != nil {
+				if _, err := dw.Write(buf[:n]); err != nil {
+					return oci.Descriptor{}, err
+				}
 			}
 			if uploadID == "" {
 				out, err := r.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{Bucket: aws.String(r.bucket), Key: aws.String(key), ContentType: aws.String("application/octet-stream")})
@@ -84,15 +97,17 @@ func (r *Registry) PushBlob(ctx context.Context, repo string, desc oci.Descripto
 	if err := ctx.Err(); err != nil {
 		return oci.Descriptor{}, err
 	}
-	if dw.Size() != desc.Size {
+	if size != desc.Size {
 		return oci.Descriptor{}, oci.ErrSizeInvalid
 	}
-	digest, err := dw.Digest()
-	if err != nil {
-		return oci.Descriptor{}, err
-	}
-	if digest != desc.Digest {
-		return oci.Descriptor{}, oci.ErrDigestInvalid
+	if dw != nil {
+		digest, err := dw.Digest()
+		if err != nil {
+			return oci.Descriptor{}, err
+		}
+		if digest != desc.Digest {
+			return oci.Descriptor{}, oci.ErrDigestInvalid
+		}
 	}
 	if uploadID == "" {
 		_, err = r.put(ctx, key, nil, "application/octet-stream", "", true)
@@ -116,14 +131,14 @@ func (r *Registry) PushBlob(ctx context.Context, repo string, desc oci.Descripto
 	if err := r.ensureRepo(ctx, repo); err != nil {
 		return oci.Descriptor{}, err
 	}
-	membership, err := r.membershipKey(repo, digest)
+	membership, err := r.membershipKey(repo, desc.Digest)
 	if err != nil {
 		return oci.Descriptor{}, err
 	}
 	if _, err := r.put(ctx, membership, nil, "application/octet-stream", "", true); err != nil && !conflict(err) {
 		return oci.Descriptor{}, err
 	}
-	return oci.Descriptor{Digest: digest, Size: desc.Size, MediaType: "application/octet-stream"}, nil
+	return oci.Descriptor{Digest: desc.Digest, Size: desc.Size, MediaType: "application/octet-stream"}, nil
 }
 
 // MountBlob publishes membership without copying content.

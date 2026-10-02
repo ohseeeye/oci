@@ -31,7 +31,7 @@ if using its default credential and region discovery.
 The client and bucket belong to the caller. The backend needs GET, HEAD, PUT,
 DELETE, LIST, multipart creation/upload/completion/abort, and permission to use
 conditional writes. The object store must support `If-Match` and `If-None-Match`
-on PUT, `If-None-Match` on multipart completion, range reads, and strongly
+on PUT, `If-Match` on GET, `If-None-Match` on multipart completion, range reads, and strongly
 consistent reads/listing. Integration tests use MinIO; AWS S3 has not been tested
 by this prototype.
 
@@ -80,15 +80,28 @@ allow completion and repository membership publication. Transfer memory is
 bounded by `Options.PartSize` (default 8 MiB, configurable from 5 to 64 MiB).
 The maximum direct blob size is 10,000 configured parts.
 
-Resumable writes publish immutable chunk objects and conditionally advance a
-session record. A stale writer cannot overwrite another writer's offset.
-Closing leaves the session resumable, including across registry instances.
-Commit freezes the session, streams its chunks through digest verification into
-the final blob, marks the session complete, and attempts chunk cleanup. Commit
-can be retried with the same digest after a storage failure; a digest mismatch
-returns the session to its active state. A committing session cannot be canceled
+Resumable writes publish immutable chunk objects and hash their bytes with
+`ocidigest` for both SHA-256 and SHA-512. Each conditional session update commits
+the chunk list, byte offset, and serialized digest state together. Failed writes
+discard their advanced local hash state. A stale writer cannot overwrite another
+writer's offset or digest state. Closing leaves the session resumable, including
+across registry instances. Resume restores the persisted hash state and checks
+that its offsets match the session and chunk records.
+
+Commit verifies the requested SHA-256 or SHA-512 digest from that state before
+freezing the session. A mismatch leaves an active session writable. Assembly
+streams the recorded chunks into the final multipart blob without hashing them
+again; conditional GETs check the ETag saved for each chunk, and byte counts are
+still verified. Assembly still downloads and re-uploads the content. Commit then
+marks the session complete and attempts chunk cleanup. It can be retried with
+the same digest after a storage failure. A committing session cannot be canceled
 because content publication may already be underway. Completed/canceled session
 tombstones remain to reject stale writers. Sessions permit up to 10,000 chunks.
+
+Digest state is mandatory for these new sessions; missing, inconsistent, or
+unsupported state is rejected rather than reconstructed from chunks. Serialized
+state is intended for the same library version and algorithm implementation, as
+documented by `ocidigest`.
 
 ## Prototype limits
 

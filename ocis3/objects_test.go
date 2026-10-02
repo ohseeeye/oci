@@ -24,8 +24,11 @@ type memoryObjects struct {
 	objects          map[string]storedObject
 	uploads          map[string]*storedUpload
 	failKey          string
+	failSuffix       string
 	failAfter        bool
 	failPrecondition bool
+	chunkGETs        int
+	multipartStarts  int
 }
 type storedObject struct {
 	data            []byte
@@ -57,9 +60,10 @@ func (m *memoryObjects) PutObject(ctx context.Context, in *s3.PutObjectInput, _ 
 	if in.IfNoneMatch != nil && exists || in.IfMatch != nil && (!exists || old.etag != *in.IfMatch) {
 		return nil, apiError("PreconditionFailed")
 	}
-	fail := key == m.failKey
+	fail := key == m.failKey || m.failSuffix != "" && strings.HasSuffix(key, m.failSuffix)
 	if fail {
 		m.failKey = ""
+		m.failSuffix = ""
 		if !m.failAfter {
 			return nil, fmt.Errorf("injected PUT failure")
 		}
@@ -80,9 +84,15 @@ func (m *memoryObjects) GetObject(ctx context.Context, in *s3.GetObjectInput, _ 
 	}
 	m.mu.Lock()
 	obj, ok := m.objects[aws.ToString(in.Key)]
+	if strings.Contains(aws.ToString(in.Key), "/chunks/") {
+		m.chunkGETs++
+	}
 	m.mu.Unlock()
 	if !ok {
 		return nil, apiError("NoSuchKey")
+	}
+	if in.IfMatch != nil && obj.etag != *in.IfMatch {
+		return nil, apiError("PreconditionFailed")
 	}
 	data := obj.data
 	if in.Range != nil {
@@ -156,6 +166,7 @@ func (m *memoryObjects) CreateMultipartUpload(ctx context.Context, in *s3.Create
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.multipartStarts++
 	id := newID()
 	m.uploads[id] = &storedUpload{key: aws.ToString(in.Key), mediaType: aws.ToString(in.ContentType), parts: map[int32][]byte{}}
 	return &s3.CreateMultipartUploadOutput{UploadId: aws.String(id)}, nil

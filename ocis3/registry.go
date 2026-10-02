@@ -39,7 +39,7 @@ var _ oci.TagHistory = (*Registry)(nil)
 
 // New constructs a registry. The client configures credentials, region,
 // endpoint, and path-style addressing. S3 must support conditional PUTs,
-// conditional multipart completion, range GETs, and consistent object listing.
+// conditional multipart completion, conditional/range GETs, and consistent listing.
 func New(client *s3.Client, bucket string, opts *Options) (*Registry, error) {
 	if client == nil {
 		return nil, fmt.Errorf("S3 client must not be nil")

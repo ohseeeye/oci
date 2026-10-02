@@ -11,18 +11,48 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/pkg/ocidigest"
 )
 
 type uploadChunk struct {
 	Key  string `json:"key"`
 	Size int64  `json:"size"`
+	ETag string `json:"etag"`
 }
 type uploadSession struct {
-	Revision string        `json:"revision"`
-	Status   string        `json:"status"`
-	Size     int64         `json:"size"`
-	Chunks   []uploadChunk `json:"chunks"`
-	Digest   oci.Digest    `json:"digest,omitempty"`
+	Revision    string          `json:"revision"`
+	Status      string          `json:"status"`
+	Size        int64           `json:"size"`
+	Chunks      []uploadChunk   `json:"chunks"`
+	Digest      oci.Digest      `json:"digest,omitempty"`
+	DigestState ocidigest.State `json:"digest_state"`
+}
+
+// digester restores exactly the algorithms maintained by new uploads. Digest
+// offsets and the recorded chunk sizes must describe the same committed bytes.
+func (s uploadSession) digester() (*ocidigest.Writer, error) {
+	dw, err := ocidigest.NewWriterFromState(nil, s.DigestState)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid upload digest state: %v", oci.ErrBlobUploadInvalid, err)
+	}
+	algs := dw.Algorithms()
+	if len(algs) != 2 || !slices.Contains(algs, ocidigest.SHA256) || !slices.Contains(algs, ocidigest.SHA512) {
+		return nil, fmt.Errorf("%w: upload must track SHA-256 and SHA-512", oci.ErrBlobUploadInvalid)
+	}
+	if s.Size < 0 || dw.Size() != s.Size || len(s.Chunks) > 10000 {
+		return nil, fmt.Errorf("%w: upload digest offset mismatch", oci.ErrBlobUploadInvalid)
+	}
+	var size int64
+	for _, chunk := range s.Chunks {
+		if chunk.Size <= 0 || chunk.Size > s.Size-size || chunk.ETag == "" {
+			return nil, fmt.Errorf("%w: invalid upload chunk record", oci.ErrBlobUploadInvalid)
+		}
+		size += chunk.Size
+	}
+	if size != s.Size {
+		return nil, fmt.Errorf("%w: upload chunk offset mismatch", oci.ErrBlobUploadInvalid)
+	}
+	return dw, nil
 }
 
 // PushBlobChunked starts a durable session made of immutable chunk objects.
@@ -50,6 +80,14 @@ func (r *Registry) PushBlobChunkedResume(ctx context.Context, repo, id string, o
 		}
 		id = newID()
 		state = uploadSession{Revision: newID(), Status: "active"}
+		dw, hashErr := ocidigest.NewWriter(nil, ocidigest.SHA256, ocidigest.SHA512)
+		if hashErr != nil {
+			return nil, hashErr
+		}
+		state.DigestState, err = dw.State()
+		if err != nil {
+			return nil, err
+		}
 		etag, err = r.putJSON(ctx, r.repoKey(repo, "_uploads/"+id+"/session"), state, "", true)
 	} else {
 		if !validID(id) {
@@ -68,6 +106,9 @@ func (r *Registry) PushBlobChunkedResume(ctx context.Context, repo, id string, o
 	}
 	if offset >= 0 && offset != state.Size {
 		return nil, oci.ErrRangeInvalid
+	}
+	if _, err := state.digester(); err != nil {
+		return nil, err
 	}
 	if chunkSize <= 0 {
 		chunkSize = r.partSize
@@ -122,6 +163,12 @@ func (w *blobWriter) Write(p []byte) (int, error) {
 	if err := w.ctx.Err(); err != nil {
 		return 0, err
 	}
+	// Restore a separate hasher for this write. Failed chunk uploads or a failed
+	// session CAS discard its advanced state without changing the writer's offset.
+	dw, err := w.state.digester()
+	if err != nil {
+		return 0, err
+	}
 	next := w.state
 	next.Chunks = slices.Clone(next.Chunks)
 	for len(p) > 0 {
@@ -130,10 +177,17 @@ func (w *blobWriter) Write(p []byte) (int, error) {
 		}
 		n := min(len(p), w.chunkSize)
 		key := w.registry.repoKey(w.repo, "_uploads/"+w.id+"/chunks/"+newID())
-		if _, err := w.registry.put(w.ctx, key, p[:n], "application/octet-stream", "", true); err != nil {
+		etag, err := w.registry.put(w.ctx, key, p[:n], "application/octet-stream", "", true)
+		if err != nil {
 			return 0, err
 		}
-		next.Chunks = append(next.Chunks, uploadChunk{Key: key, Size: int64(n)})
+		if etag == "" {
+			return 0, fmt.Errorf("object store did not return a chunk ETag")
+		}
+		if _, err := dw.Write(p[:n]); err != nil {
+			return 0, err
+		}
+		next.Chunks = append(next.Chunks, uploadChunk{Key: key, Size: int64(n), ETag: etag})
 		next.Size += int64(n)
 		p = p[n:]
 	}
@@ -141,6 +195,10 @@ func (w *blobWriter) Write(p []byte) (int, error) {
 		return 0, nil
 	}
 	n := next.Size - w.state.Size
+	next.DigestState, err = dw.State()
+	if err != nil {
+		return 0, err
+	}
 	if err := w.publish(w.ctx, next); err != nil {
 		return 0, err
 	}
@@ -163,6 +221,20 @@ func (w *blobWriter) Commit(digest oci.Digest) (oci.Descriptor, error) {
 	if w.state.Status != "active" && w.state.Status != "committing" {
 		return oci.Descriptor{}, oci.ErrBlobUploadUnknown
 	}
+	if err := w.ctx.Err(); err != nil {
+		return oci.Descriptor{}, err
+	}
+	dw, err := w.state.digester()
+	if err != nil {
+		return oci.Descriptor{}, err
+	}
+	actual, err := dw.DigestFor(digest.Algorithm())
+	if err != nil {
+		return oci.Descriptor{}, fmt.Errorf("%w: upload digest algorithm is not tracked", oci.ErrDigestInvalid)
+	}
+	if actual != digest {
+		return oci.Descriptor{}, oci.ErrDigestInvalid
+	}
 	if w.state.Status == "active" {
 		next := w.state
 		next.Status = "committing"
@@ -175,10 +247,11 @@ func (w *blobWriter) Commit(digest oci.Digest) (oci.Descriptor, error) {
 	}
 	reader := &chunkReader{registry: w.registry, ctx: w.ctx, chunks: w.state.Chunks, prefix: w.registry.repoKey(w.repo, "_uploads/"+w.id+"/chunks/")}
 	defer reader.Close()
-	desc, err := w.registry.PushBlob(w.ctx, w.repo, oci.Descriptor{Digest: digest, Size: w.state.Size}, reader)
+	// The persisted state already verifies these bytes. Conditional chunk GETs
+	// enforce object identity during assembly, so no second hash pass is needed.
+	desc, err := w.registry.storeBlob(w.ctx, w.repo, oci.Descriptor{Digest: digest, Size: w.state.Size}, reader, nil)
 	if err != nil {
-		// A bad digest must not permanently freeze an otherwise resumable upload.
-		if err == oci.ErrDigestInvalid || err == oci.ErrSizeInvalid {
+		if err == oci.ErrSizeInvalid {
 			next := w.state
 			next.Status = "active"
 			next.Digest = ""
@@ -262,10 +335,10 @@ func (c *chunkReader) Read(p []byte) (int, error) {
 			}
 			chunk := c.chunks[0]
 			c.chunks = c.chunks[1:]
-			if len(chunk.Key) <= len(c.prefix) || chunk.Key[:len(c.prefix)] != c.prefix || !validID(chunk.Key[len(c.prefix):]) || chunk.Size < 0 {
+			if len(chunk.Key) <= len(c.prefix) || chunk.Key[:len(c.prefix)] != c.prefix || !validID(chunk.Key[len(c.prefix):]) || chunk.Size <= 0 || chunk.ETag == "" {
 				return 0, fmt.Errorf("invalid upload chunk")
 			}
-			out, err := c.registry.client.GetObject(c.ctx, &s3.GetObjectInput{Bucket: aws.String(c.registry.bucket), Key: aws.String(chunk.Key)})
+			out, err := c.registry.client.GetObject(c.ctx, &s3.GetObjectInput{Bucket: aws.String(c.registry.bucket), Key: aws.String(chunk.Key), IfMatch: aws.String(chunk.ETag)})
 			if err != nil {
 				return 0, err
 			}
