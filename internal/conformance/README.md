@@ -11,7 +11,9 @@ task conformance
 ```
 
 Individual backends can be selected with `task conformance:ocimem`,
-`task conformance:ocilayout`, or `task conformance:ocisqlite`.
+`task conformance:ocilayout`, `task conformance:ocisqlite`, or
+`task conformance:ocis3`. The S3 tests start a pinned Chainguard MinIO container
+and also check uploads, concurrent tag updates, history, and multipart ranges.
 
 The harness builds a pinned version of the upstream conformance runner, starts
 each registry on a temporary local port, and fails when the upstream runner
@@ -70,7 +72,7 @@ OCI_CONFORMANCE_RESULTS="$PWD/results" go test -tags=integration ./ocimem ./ocil
 
 Docker must be able to mount the results directory and temporary runner assets.
 
-`task conformance` runs the root-module backends and the nested SQLite module.
+`task conformance` runs the root-module backends and the nested SQLite and S3 modules.
 For each additional nested backend, add a task that runs its module's integration
 tests and include it in the aggregate target; Go's `./...` does not cross module
 boundaries.
