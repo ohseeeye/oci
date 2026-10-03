@@ -32,6 +32,8 @@ import (
 )
 
 // PushManifest pushes a manifest with the given media type and contents.
+// It sends params.IfMatch only after SupportsIfMatch reports true; before
+// discovery the condition is omitted and the push is unconditional.
 func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
 	if mediaType == "" {
 		return oci.Descriptor{}, fmt.Errorf("PushManifest called with empty mediaType")
@@ -52,18 +54,27 @@ func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte,
 	if params != nil {
 		tags = params.Tags
 	}
+	if params != nil && params.IfMatch != "" && c.SupportsIfMatch() {
+		if len(tags) != 1 {
+			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+		}
+		// A conditional update targets the tag itself. Never fall back to an
+		// unconditional or bulk push when the precondition fails.
+		_, err := c.putManifest(ctx, repo, tags[0], nil, desc, contents, params.IfMatch)
+		return desc, err
+	}
 
 	// If there are no tags, push once by digest.
 	// If there are tags, push once per tag (all referencing the same contents).
 	if len(tags) == 0 {
-		_, err := c.putManifest(ctx, repo, desc.Digest.String(), nil, desc, contents)
+		_, err := c.putManifest(ctx, repo, desc.Digest.String(), nil, desc, contents, "")
 		return desc, err
 	} else {
-		createdTags, err := c.putManifest(ctx, repo, desc.Digest.String(), tags, desc, contents)
+		createdTags, err := c.putManifest(ctx, repo, desc.Digest.String(), tags, desc, contents, "")
 		if err != nil || len(createdTags) != len(tags) {
 			// bulk send failed, fallback to sending one at a time
 			for _, tag := range tags {
-				_, err = c.putManifest(ctx, repo, tag, nil, desc, contents)
+				_, err = c.putManifest(ctx, repo, tag, nil, desc, contents, "")
 				if err != nil {
 					return oci.Descriptor{}, fmt.Errorf("creating tag %s failed: %w", tag, err)
 				}
@@ -73,13 +84,16 @@ func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte,
 	return desc, nil
 }
 
-func (c *Client) putManifest(ctx context.Context, repo string, tagOrDigest string, tags []string, desc oci.Descriptor, contents []byte) ([]string, error) {
+func (c *Client) putManifest(ctx context.Context, repo string, tagOrDigest string, tags []string, desc oci.Descriptor, contents []byte, ifMatch string) ([]string, error) {
 	u := manifestURLWithTags(repo, tagOrDigest, tags)
 	req, err := newRequest(ctx, http.MethodPut, u, bytes.NewReader(contents), pushScope(repo))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", desc.MediaType)
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
+	}
 	req.ContentLength = desc.Size
 	resp, err := c.do(req, http.StatusCreated)
 	if err != nil {

@@ -103,6 +103,21 @@ var errCannotOverwriteTag = fmt.Errorf("%w: cannot overwrite tag", oci.ErrDenied
 func (r *Registry) PushManifest(ctx context.Context, repoName string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if params != nil && params.IfMatch != "" {
+		if len(params.Tags) != 1 {
+			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+		}
+		if !ociref.IsValidRepository(repoName) || !ociref.IsValidTag(params.Tags[0]) {
+			return oci.Descriptor{}, oci.ErrNameInvalid
+		}
+		var current oci.Digest
+		if repo := r.repos[repoName]; repo != nil {
+			current = repo.tags[params.Tags[0]].Digest
+		}
+		if err := oci.CheckManifestIfMatch(params.IfMatch, current); err != nil {
+			return oci.Descriptor{}, err
+		}
+	}
 	repo, err := r.makeRepo(repoName)
 	if err != nil {
 		return oci.Descriptor{}, err

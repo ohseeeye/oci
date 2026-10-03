@@ -87,6 +87,11 @@ func ErrManifestInvalid(details string) *OCIError {
 	}
 }
 
+// ErrPreconditionFailed reports a failed conditional manifest tag update.
+func ErrPreconditionFailed() *OCIError {
+	return &OCIError{status: http.StatusPreconditionFailed, Code: "PRECONDITION_FAILED", Message: "manifest tag precondition failed"}
+}
+
 // ErrManifestUnknown is an error for if a manifest is not found in the registry
 func ErrManifestUnknown(digest string) *OCIError {
 	return &OCIError{
