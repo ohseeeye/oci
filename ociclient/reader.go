@@ -100,6 +100,9 @@ func (c *Client) resolve(req *http.Request, knownDigest oci.Digest) (oci.Descrip
 	if err != nil {
 		return oci.Descriptor{}, fmt.Errorf("invalid descriptor in response: %v", err)
 	}
+	if knownDigest == "" {
+		c.observeManifestETag(resp, desc.Digest)
+	}
 	return desc, nil
 }
 
@@ -183,6 +186,9 @@ func (c *Client) read(req *http.Request, knownDigest oci.Digest, isManifest bool
 		desc.Digest = ocidigest.FromBytes(data)
 		resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(data))
+	}
+	if isManifest && knownDigest == "" {
+		c.observeManifestETag(resp, desc.Digest)
 	}
 	return newBlobReader(resp.Body, desc), nil
 }

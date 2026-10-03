@@ -40,6 +40,7 @@ var errorStatuses = map[string]int{
 	ErrUnsupported.Code():         http.StatusBadRequest,
 	ErrTooManyRequests.Code():     http.StatusTooManyRequests,
 	ErrRangeInvalid.Code():        http.StatusRequestedRangeNotSatisfiable,
+	ErrPreconditionFailed.Code():  http.StatusPreconditionFailed,
 }
 
 // WireErrors is the JSON format used for error responses in
@@ -202,6 +203,8 @@ func (e *httpError) Is(err error) bool {
 	switch e.statusCode {
 	case http.StatusRequestedRangeNotSatisfiable:
 		return err == ErrRangeInvalid
+	case http.StatusPreconditionFailed:
+		return err == ErrPreconditionFailed
 	}
 	return false
 }
@@ -333,6 +336,9 @@ var (
 	ErrUnsupported         = NewError("the operation is unsupported", "UNSUPPORTED", nil)
 	ErrTooManyRequests     = NewError("too many requests", "TOOMANYREQUESTS", nil)
 	ErrReferenced          = NewError("referenced by another object", "DENIED", nil)
+
+	// ErrPreconditionFailed is the experimental conditional manifest push error.
+	ErrPreconditionFailed = NewError("manifest tag precondition failed", "PRECONDITION_FAILED", nil)
 
 	// ErrRangeInvalid allows Registry implementations to reject invalid ranges,
 	// such as a chunked upload PATCH not following the range from a previous PATCH.

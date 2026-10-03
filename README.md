@@ -53,6 +53,12 @@ upstream 404 reports `oci.ErrUnsupported`.
 
 The server currently passes the [OCI distribution conformance tests](https://pkg.go.dev/github.com/opencontainers/distribution-spec/conformance).
 
+Experimental [conditional manifest tag updates](./conditional_manifests.md)
+use `If-Match` and `oci.PushManifestParameters.IfMatch` to protect updates against
+concurrent writers. Memory and layout backends support the condition; HTTP
+clients forward it after discovering a digest ETag on a tag GET or HEAD.
+Middleware forwards it to storage. Other implementations may ignore it.
+
 ## Usage
 
 ### List tags on Docker Hub

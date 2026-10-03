@@ -58,6 +58,7 @@ func (s *Server) manifestHeadGet() http.HandlerFunc {
 			w.Header().Set("Content-Type", desc.MediaType)
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", desc.Size))
 			w.Header().Set("Docker-Content-Digest", desc.Digest.String())
+			w.Header().Set("ETag", strconv.Quote(desc.Digest.String()))
 			// TODO: solve eventing.
 			return
 		}
@@ -76,6 +77,7 @@ func (s *Server) manifestHeadGet() http.HandlerFunc {
 		w.Header().Set("Content-Type", desc.MediaType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", desc.Size))
 		w.Header().Set("Docker-Content-Digest", desc.Digest.String())
+		w.Header().Set("ETag", strconv.Quote(desc.Digest.String()))
 		if i, err := io.Copy(w, b); err != nil {
 			s.logError(r.Context(), "writing manifest response", err, "repository", name, "reference", reference, "bytesWritten", i, "size", desc.Size)
 		}
@@ -227,12 +229,23 @@ func (s *Server) manifestPut() http.HandlerFunc {
 		if tag != "" {
 			tags = append(tags, tag)
 		}
+		ifMatchHeaders := r.Header.Values("If-Match")
+		ifMatch := strings.Join(ifMatchHeaders, ",")
+		if len(ifMatchHeaders) > 0 && (strings.TrimSpace(ifMatch) == "" || tag == "" || len(tags) != 1) {
+			returnError(w, ErrManifestInvalid("If-Match requires a nonempty condition and a single tag reference"))
+			return
+		}
 		params := &oci.PushManifestParameters{
-			Digest: dgst,
-			Tags:   tags,
+			Digest:  dgst,
+			Tags:    tags,
+			IfMatch: ifMatch,
 		}
 		_, err = s.db.PushManifest(r.Context(), name, b, contentType, params)
 		if err != nil {
+			if errors.Is(err, oci.ErrPreconditionFailed) {
+				returnError(w, ErrPreconditionFailed())
+				return
+			}
 			if errors.Is(err, oci.ErrManifestBlobUnknown) {
 				returnError(w, ErrManifestBlobUnknown(err.Error()))
 				return
@@ -257,6 +270,7 @@ func (s *Server) manifestPut() http.HandlerFunc {
 		u := fmt.Sprintf("/v2/%s/manifests/%s", name, reference)
 		w.Header().Set("Location", u)
 		w.Header().Set("Docker-Content-Digest", dgst.String())
+		w.Header().Set("ETag", strconv.Quote(dgst.String()))
 		for _, t := range tags {
 			if strings.ContainsAny(t, "\r\n") {
 				continue

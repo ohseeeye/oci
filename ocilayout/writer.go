@@ -16,6 +16,7 @@ package ocilayout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -152,6 +153,22 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if params != nil && params.IfMatch != "" {
+		if len(tags) != 1 {
+			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+		}
+		currentState, err := r.layoutForRepoLocked(repo, false)
+		if err != nil {
+			return oci.Descriptor{}, err
+		}
+		current, err := r.tagDescriptor(currentState, repo, tags[0])
+		if err != nil && !errors.Is(err, oci.ErrManifestUnknown) && !errors.Is(err, oci.ErrNameUnknown) {
+			return oci.Descriptor{}, err
+		}
+		if err := oci.CheckManifestIfMatch(params.IfMatch, current.Digest); err != nil {
+			return oci.Descriptor{}, err
+		}
+	}
 	st, err := r.layoutForRepoLocked(repo, true)
 	if err != nil {
 		return oci.Descriptor{}, err
