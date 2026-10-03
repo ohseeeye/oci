@@ -22,10 +22,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ohseeeye/oci"
@@ -352,6 +355,93 @@ func AssertBlobContent(t *testing.T, r oci.BlobReader, wantData []byte, wantMedi
 	require.Equal(t, ocidigest.FromBytes(wantData), desc.Digest, "mismatched digest")
 	require.Equal(t, wantData, gotData, "mismatched content")
 	require.Equal(t, wantMediaType, desc.MediaType, "media type mismatch")
+}
+
+// CheckConditionalManifestPush verifies conditional tag updates, rejection
+// without manifest or history changes, and atomic updates by concurrent writers.
+// The registry must be empty and support both IfMatch and oci.TagHistory.
+func CheckConditionalManifestPush(t *testing.T, r oci.Registry) {
+	t.Helper()
+	ctx := t.Context()
+	first := conditionalIndex("first")
+	old, err := r.PushManifest(ctx, "example/app", first, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}, Digest: ocidigest.SHA512.FromBytes(first)})
+	require.NoError(t, err)
+	second := conditionalIndex("second")
+	for _, tc := range []struct {
+		condition string
+		tags      []string
+		want      error
+	}{
+		{strconv.Quote(ocidigest.FromBytes(second).String()), []string{"latest"}, oci.ErrManifestInvalid},
+		{"W/" + strconv.Quote(old.Digest.String()), []string{"latest"}, oci.ErrManifestInvalid},
+		{`"other", ` + strconv.Quote(old.Digest.String()), []string{"latest"}, oci.ErrManifestInvalid},
+		{"*", []string{"latest"}, oci.ErrManifestInvalid},
+		{strconv.Quote(old.Digest.String()), []string{"missing"}, oci.ErrManifestInvalid},
+		{`""`, []string{"missing"}, oci.ErrManifestInvalid},
+		{old.Digest.String(), []string{"latest"}, oci.ErrManifestInvalid},
+		{strconv.Quote(old.Digest.String()), nil, oci.ErrManifestInvalid},
+		{strconv.Quote(old.Digest.String()), []string{"latest", "extra"}, oci.ErrManifestInvalid},
+	} {
+		_, err := r.PushManifest(ctx, "example/app", second, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: tc.tags, IfMatch: tc.condition})
+		require.ErrorIs(t, err, tc.want)
+	}
+	current, err := r.ResolveTag(ctx, "example/app", "latest")
+	require.NoError(t, err)
+	require.Equal(t, old.Digest, current.Digest)
+	_, err = r.ResolveManifest(ctx, "example/app", ocidigest.FromBytes(second))
+	require.ErrorIs(t, err, oci.ErrManifestUnknown, "failed conditions must not publish the new manifest")
+	history, ok := r.(oci.TagHistory)
+	require.True(t, ok)
+	entries, err := oci.All(history.TagHistory(ctx, "example/app", "latest", nil))
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "failed conditions must not append history")
+	_, err = r.PushManifest(ctx, "absent/app", second, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: strconv.Quote(old.Digest.String())})
+	require.ErrorIs(t, err, oci.ErrManifestInvalid)
+	next, err := r.PushManifest(ctx, "example/app", second, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: strconv.Quote(old.Digest.String())})
+	require.NoError(t, err)
+	entries, err = oci.All(history.TagHistory(ctx, "example/app", "latest", nil))
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	require.Equal(t, next.Digest, entries[0].Digest)
+	_, err = r.PushManifest(ctx, "example/app", conditionalIndex("third"), oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: strconv.Quote(next.Digest.String())})
+	require.NoError(t, err)
+
+	t.Run("concurrent writers", func(t *testing.T) {
+		initial, err := r.ResolveTag(ctx, "example/app", "latest")
+		require.NoError(t, err)
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		var wg sync.WaitGroup
+		for i := range 2 {
+			wg.Go(func() {
+				<-start
+				_, err := r.PushManifest(ctx, "example/app", conditionalIndex(fmt.Sprint(i)), oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: strconv.Quote(initial.Digest.String())})
+				errs <- err
+			})
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		succeeded, rejected := 0, 0
+		for err := range errs {
+			if err == nil {
+				succeeded++
+			} else if errors.Is(err, oci.ErrManifestInvalid) {
+				rejected++
+			} else {
+				t.Fatalf("unexpected push error: %v", err)
+			}
+		}
+		require.Equal(t, 1, succeeded)
+		require.Equal(t, 1, rejected)
+		entries, err := oci.All(history.TagHistory(ctx, "example/app", "latest", nil))
+		require.NoError(t, err)
+		require.Len(t, entries, 4, "only the winning writer adds history")
+	})
+}
+
+func conditionalIndex(version string) []byte {
+	return []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[],"annotations":{"version":%q}}`, oci.MediaTypeImageIndex, version))
 }
 
 func ref[T any](x T) *T {

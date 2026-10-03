@@ -11,9 +11,32 @@ import (
 	"testing"
 
 	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/internal/ocitest"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConditionalManifestPush(t *testing.T) {
+	for _, factory := range []struct {
+		name        string
+		newRegistry func(*testing.T) oci.Registry
+	}{
+		{"shared", func(t *testing.T) oci.Registry {
+			reg, err := New(t.TempDir(), nil)
+			require.NoError(t, err)
+			return reg
+		}},
+		{"per repository", func(t *testing.T) oci.Registry {
+			reg, err := NewPerRepository(t.TempDir(), nil)
+			require.NoError(t, err)
+			return reg
+		}},
+	} {
+		t.Run(factory.name, func(t *testing.T) {
+			ocitest.CheckConditionalManifestPush(t, factory.newRegistry(t))
+		})
+	}
+}
 
 func TestSharedLayoutPushAndRead(t *testing.T) {
 	ctx := context.Background()

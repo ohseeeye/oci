@@ -14,6 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestConditionalManifestPush(t *testing.T) {
+	ocitest.CheckConditionalManifestPush(t, New())
+}
+
 var pushManifestTests = []struct {
 	testName     string
 	preload      ocitest.RepoContent

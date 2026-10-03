@@ -16,11 +16,13 @@ package ocilayout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 
 	"github.com/ohseeeye/oci"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
@@ -152,6 +154,22 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if params != nil && params.IfMatch != "" {
+		if len(tags) != 1 {
+			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+		}
+		currentState, err := r.layoutForRepoLocked(repo, false)
+		if err != nil {
+			return oci.Descriptor{}, err
+		}
+		current, err := r.tagDescriptor(currentState, repo, tags[0])
+		if err != nil && !errors.Is(err, oci.ErrManifestUnknown) && !errors.Is(err, oci.ErrNameUnknown) {
+			return oci.Descriptor{}, err
+		}
+		if current.Digest == "" || params.IfMatch != strconv.Quote(current.Digest.String()) {
+			return oci.Descriptor{}, fmt.Errorf("%w: If-Match does not match the current tag digest", oci.ErrManifestInvalid)
+		}
+	}
 	st, err := r.layoutForRepoLocked(repo, true)
 	if err != nil {
 		return oci.Descriptor{}, err
