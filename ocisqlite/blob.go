@@ -34,7 +34,7 @@ func (r contextReader) Read(p []byte) (int, error) {
 }
 
 // writeBlob verifies even duplicate uploads. Publication never replaces an
-// existing file, and file/directory syncs precede the metadata transaction.
+// existing file, and file/directory syncs precede committing its metadata.
 func writeBlob(ctx context.Context, dir string, desc oci.Descriptor, content io.Reader) (oci.Descriptor, error) {
 	if desc.Size < 0 {
 		return oci.Descriptor{}, oci.ErrSizeInvalid

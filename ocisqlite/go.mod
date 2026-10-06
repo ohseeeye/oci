@@ -3,7 +3,7 @@ module github.com/ohseeeye/oci/ocisqlite
 go 1.25.0
 
 require (
-	github.com/ohseeeye/oci v0.0.3
+	github.com/ohseeeye/oci v0.0.5
 	github.com/stretchr/testify v1.11.1
 	zombiezen.com/go/sqlite v1.4.2
 )

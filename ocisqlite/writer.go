@@ -3,9 +3,11 @@ package ocisqlite
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/ohseeeye/oci"
@@ -62,6 +64,8 @@ func (r *Registry) MountBlob(ctx context.Context, fromRepo, toRepo string, diges
 // PushManifest stores a manifest and updates its tags and history atomically.
 // Required children must already be present in the same repository; subjects
 // may be dangling and layers with external URLs need not be stored locally.
+// IfMatch checks one tag's quoted digest inside the write transaction before
+// publishing content. A mismatch returns oci.ErrManifestInvalid.
 func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
 	if err := ctx.Err(); err != nil {
 		return oci.Descriptor{}, err
@@ -76,7 +80,12 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	data = slices.Clone(data)
 	digest := ocidigest.FromBytes(data)
 	var tags []string
+	var ifMatch string
 	if params != nil {
+		ifMatch = params.IfMatch
+		if ifMatch != "" && len(params.Tags) != 1 {
+			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+		}
 		tags = slices.Compact(slices.Sorted(slices.Values(params.Tags)))
 		if params.Digest != "" {
 			digest = params.Digest
@@ -92,13 +101,27 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 		return oci.Descriptor{}, fmt.Errorf("%w: %v", oci.ErrManifestInvalid, err)
 	}
 	desc := oci.Descriptor{Digest: digest, Size: int64(len(data)), MediaType: mediaType}
-	if _, err := writeBlob(ctx, r.dir, desc, bytes.NewReader(data)); err != nil {
-		return oci.Descriptor{}, err
+	if ifMatch == "" {
+		if _, err := writeBlob(ctx, r.dir, desc, bytes.NewReader(data)); err != nil {
+			return oci.Descriptor{}, err
+		}
 	}
 	err = r.withConn(ctx, true, func(conn *sqlite.Conn) error {
 		id, err := repository(conn, repo, true)
 		if err != nil {
 			return err
+		}
+		if ifMatch != "" {
+			current, err := resolveManifest(conn, id, "", tags[0])
+			if err != nil && !errors.Is(err, oci.ErrManifestUnknown) {
+				return err
+			}
+			if current.Digest == "" || ifMatch != strconv.Quote(current.Digest.String()) {
+				return fmt.Errorf("%w: If-Match does not match the current tag digest", oci.ErrManifestInvalid)
+			}
+			if _, err := writeBlob(ctx, r.dir, desc, bytes.NewReader(data)); err != nil {
+				return err
+			}
 		}
 		for _, child := range info.children {
 			if !child.manifest && len(child.desc.URLs) > 0 {
