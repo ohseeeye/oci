@@ -114,12 +114,31 @@ func New(host string, opts0 *Options) (*Client, error) {
 // registry.
 type Client struct {
 	*oci.Funcs
-	httpScheme   string
-	httpHost     string
-	httpClient   *http.Client
-	userAgent    string
-	debugID      string
-	listPageSize int
+	httpScheme      string
+	httpHost        string
+	httpClient      *http.Client
+	userAgent       string
+	debugID         string
+	listPageSize    int
+	ifMatchObserved atomic.Bool
+}
+
+// SupportsIfMatch reports whether a successful GetTag or ResolveTag response
+// has advertised a strong ETag equal to its quoted manifest digest. It is
+// initially false, and discovery is local to this Client.
+//
+// Experimental: this is the discovery convention for our conditional manifest
+// extension. Other registries can return ETags without enforcing If-Match on PUT;
+// this observation does not prove that their backend supports conditional writes.
+func (c *Client) SupportsIfMatch() bool {
+	return c.ifMatchObserved.Load()
+}
+
+func (c *Client) observeManifestETag(resp *http.Response, digest oci.Digest) {
+	values := resp.Header.Values("ETag")
+	if digest != "" && len(values) == 1 && strings.TrimSpace(values[0]) == strconv.Quote(digest.String()) {
+		c.ifMatchObserved.Store(true)
+	}
 }
 
 var _ oci.Registry = (*Client)(nil)

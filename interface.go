@@ -136,6 +136,14 @@ type Reader interface {
 type PushManifestParameters struct {
 	Digest Digest
 	Tags   []string
+	// IfMatch is an experimental HTTP If-Match condition for exactly one tag.
+	// It is the quoted manifest digest returned in ETag. Lists, weak validators,
+	// and "*" are not supported.
+	// Empty means unconditional. Supporting backends compare and update the tag
+	// atomically; a mismatch returns ErrManifestInvalid. Other implementations
+	// may ignore this field, so callers must know whether their backend supports it.
+	// ociclient omits it until a tag GET or HEAD advertises a digest ETag.
+	IfMatch string
 }
 
 // Writer defines registry actions that write to blobs, manifests and tags.
