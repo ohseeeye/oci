@@ -8,11 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/ohseeeye/oci"
+	"github.com/ohseeeye/oci/internal/ocitest"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 	"zombiezen.com/go/sqlite"
@@ -97,6 +99,87 @@ func TestSharedContentAndPersistence(t *testing.T) {
 	require.Len(t, entries, 4, "mounting must not copy content")
 	require.FileExists(t, filepath.Join(dir, "metadata.db"))
 	require.NoFileExists(t, filepath.Join(dir, "index.json"))
+}
+
+func TestConditionalManifestPush(t *testing.T) {
+	ocitest.CheckConditionalManifestPush(t, newRegistry(t, t.TempDir()))
+}
+
+func TestConditionalManifestPushAcrossInstances(t *testing.T) {
+	dir := t.TempDir()
+	first := newRegistry(t, dir)
+	second := newRegistry(t, dir)
+	old := pushTaggedIndex(t, first, "example", "latest", "initial")
+	condition := strconv.Quote(old.Digest.String())
+	start := make(chan struct{})
+	type result struct {
+		digest oci.Digest
+		err    error
+	}
+	results := make(chan result, 2)
+	var wg sync.WaitGroup
+	for i, r := range []*Registry{first, second} {
+		wg.Go(func() {
+			data := manifestBytes(t, oci.IndexOrManifest{
+				SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex,
+				Annotations: map[string]string{"version": fmt.Sprint(i)},
+			})
+			<-start
+			_, err := r.PushManifest(t.Context(), "example", data, oci.MediaTypeImageIndex,
+				&oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: condition})
+			results <- result{ocidigest.FromBytes(data), err}
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var winner, loser oci.Digest
+	for got := range results {
+		if got.err == nil {
+			require.Empty(t, winner, "only one writer may replace the observed tag")
+			winner = got.digest
+		} else {
+			require.ErrorIs(t, got.err, oci.ErrManifestInvalid)
+			require.ErrorContains(t, got.err, "If-Match does not match the current tag digest")
+			loser = got.digest
+		}
+	}
+	require.NotEmpty(t, winner)
+	require.NotEmpty(t, loser)
+	for _, r := range []*Registry{first, second} {
+		current, err := r.ResolveTag(t.Context(), "example", "latest")
+		require.NoError(t, err)
+		require.Equal(t, winner, current.Digest)
+		_, err = r.ResolveManifest(t.Context(), "example", loser)
+		require.ErrorIs(t, err, oci.ErrManifestUnknown)
+		_, err = r.ResolveBlob(t.Context(), "example", loser)
+		require.ErrorIs(t, err, oci.ErrBlobUnknown)
+		entries, err := oci.All(r.TagHistory(t.Context(), "example", "latest", nil))
+		require.NoError(t, err)
+		require.Len(t, entries, 2)
+		require.Equal(t, winner, entries[0].Digest)
+	}
+	path, err := blobPath(dir, loser)
+	require.NoError(t, err)
+	require.NoFileExists(t, path, "failed conditions must not publish blob files")
+}
+
+func TestConditionalManifestPushMissingRepository(t *testing.T) {
+	dir := t.TempDir()
+	r := newRegistry(t, dir)
+	data := manifestBytes(t, oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex})
+	digest := ocidigest.FromBytes(data)
+	for _, tags := range [][]string{{"latest"}, {"latest", "latest"}} {
+		_, err := r.PushManifest(t.Context(), "missing", data, oci.MediaTypeImageIndex,
+			&oci.PushManifestParameters{Tags: tags, IfMatch: strconv.Quote(digest.String())})
+		require.ErrorIs(t, err, oci.ErrManifestInvalid)
+	}
+	repos, err := oci.All(r.Repositories(t.Context(), ""))
+	require.NoError(t, err)
+	require.Empty(t, repos, "failed conditions must roll back repository creation")
+	path, err := blobPath(dir, digest)
+	require.NoError(t, err)
+	require.NoFileExists(t, path)
 }
 
 func TestBlobValidationAndCancellation(t *testing.T) {

@@ -73,8 +73,18 @@ manifest's annotations and artifact type, falling back to the config media type.
 
 ## Transactions and lifecycle
 
+Conditional manifest pushes accept `PushManifestParameters.IfMatch` for exactly
+one tag, using the quoted digest returned in its ETag. SQLite compares the
+current digest and updates the tag and history in the same immediate write
+transaction, including across registry instances sharing the database. A
+mismatch returns `oci.ErrManifestInvalid` (`400` / `MANIFEST_INVALID` over HTTP),
+without publishing content or changing metadata. Lists, weak ETags, and `*` are
+not supported; an empty condition leaves ordinary pushes unconditional.
+
 Blob uploads stream to a temporary file, verify size and digest, sync their
 content, and publish through an atomic hard link before metadata is committed.
+Conditional manifest content is published after its condition has passed,
+while holding the write transaction.
 Both directories must be on the same local filesystem. Duplicate uploads are
 still verified. Failed metadata commits may leave an unreferenced content file,
 but do not make unpublished content visible through the registry.
