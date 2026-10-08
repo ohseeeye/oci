@@ -124,6 +124,9 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 			}
 		}
 		for _, child := range info.children {
+			if r.allowSparseManifests {
+				break
+			}
 			if !child.manifest && len(child.desc.URLs) > 0 {
 				continue
 			}

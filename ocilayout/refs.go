@@ -101,7 +101,13 @@ func manifestInfoFromBytes(mediaType string, data []byte) (manifestInfo, error) 
 	if err := m.Validate(); err != nil {
 		return manifestInfo{}, err
 	}
-	return indexOrManifestInfo(m), nil
+	info := indexOrManifestInfo(m)
+	for _, child := range info.descriptors {
+		if child.desc.Size < 0 || child.desc.MediaType == "" {
+			return manifestInfo{}, fmt.Errorf("invalid child descriptor")
+		}
+	}
+	return info, nil
 }
 
 func indexOrManifestInfo(m oci.IndexOrManifest) manifestInfo {
@@ -155,31 +161,38 @@ func (r *Registry) reachable(st *layoutState, repo string) (map[oci.Digest]oci.D
 	manifests := make(map[oci.Digest]oci.Descriptor)
 	visiting := make(map[oci.Digest]bool)
 	for _, ref := range refs {
-		if err := r.walkManifest(st, ref.desc, manifests, visiting); err != nil {
+		if err := r.walkManifest(st, repo, ref.desc, manifests, visiting); err != nil {
 			return nil, err
 		}
 	}
 	return manifests, nil
 }
 
-func (r *Registry) walkManifest(st *layoutState, desc oci.Descriptor, manifests map[oci.Digest]oci.Descriptor, visiting map[oci.Digest]bool) error {
+func (r *Registry) walkManifest(st *layoutState, repo string, desc oci.Descriptor, manifests map[oci.Digest]oci.Descriptor, visiting map[oci.Digest]bool) error {
 	if visiting[desc.Digest] {
 		return nil
 	}
 	visiting[desc.Digest] = true
 	defer delete(visiting, desc.Digest)
-	manifests[desc.Digest] = desc
+	removed, err := evicted(st.index, repo, "manifest", desc.Digest)
+	if err != nil || removed {
+		return err
+	}
 	data, err := osReadBlob(st.dir, desc.Digest)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
+	manifests[desc.Digest] = desc
 	info, err := manifestInfoFromBytes(desc.MediaType, data)
 	if err != nil {
 		return err
 	}
 	for _, child := range info.descriptors {
 		if child.kind == kindManifest {
-			if err := r.walkManifest(st, child.desc, manifests, visiting); err != nil {
+			if err := r.walkManifest(st, repo, child.desc, manifests, visiting); err != nil {
 				return err
 			}
 		}

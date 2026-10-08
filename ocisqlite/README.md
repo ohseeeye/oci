@@ -122,3 +122,18 @@ go test -tags=integration ./... -run TestOCIConformance -count=1 -v
 Conformance tests use the repository's shared Docker harness. From the repository
 root, `task conformance:ocisqlite` runs just this backend; `task conformance`
 includes it alongside `ocimem` and `ocilayout`.
+
+## Sparse manifests
+
+`Options.AllowSparseManifests` defaults to false. Enable it for a cache to accept
+manifests before children arrive and to evict referenced children independently.
+Structure, descriptor, and digest validation still apply; missing content is not
+reported as available. Parent relationships are retained through child eviction.
+Strict instances continue validating child availability inside their transaction.
+
+Opening a version-one database automatically migrates its metadata to schema
+version two, preserving existing content, relationships, tags, and history. The
+migration removes child foreign keys from the two reference tables while keeping
+parent foreign keys. Previous versions of this package cannot open version-two
+databases. As with ordinary deletion, eviction removes repository metadata but
+retains physical content files; it does not reclaim disk space.

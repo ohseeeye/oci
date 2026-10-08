@@ -213,16 +213,19 @@ func (r *Registry) checkManifestReferences(repoName string, mediaType string, da
 		// TODO decide what to do about errUnknownManifestMediaTypeForIteration
 		return manifestInfo{}, err
 	}
-	if r.cfg.LaxChildReferences {
-		return info, nil
-	}
 	repo, err := r.repo(repoName)
 	if err != nil {
 		return manifestInfo{}, err
 	}
 	for info := range info.descriptors {
+		if info.desc.Size < 0 {
+			return manifestInfo{}, fmt.Errorf("negative size in %s", info.name)
+		}
 		if err := CheckDescriptor(info.desc, nil); err != nil {
 			return manifestInfo{}, fmt.Errorf("bad descriptor in %s: %v", info.name, err)
+		}
+		if r.cfg.AllowSparseManifests || r.cfg.LaxChildReferences {
+			continue
 		}
 		switch info.kind {
 		case kindBlob:

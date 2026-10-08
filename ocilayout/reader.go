@@ -100,6 +100,13 @@ func (r *Registry) resolveBlob(ctx context.Context, repo string, digest oci.Dige
 	if err != nil {
 		return oci.Descriptor{}, nil, err
 	}
+	removed, err := evicted(st.index, repo, "blob", digest)
+	if err != nil {
+		return oci.Descriptor{}, nil, err
+	}
+	if removed {
+		return oci.Descriptor{}, nil, oci.ErrBlobUnknown
+	}
 	path, err := blobPath(st.dir, digest)
 	if err != nil {
 		return oci.Descriptor{}, nil, err
@@ -139,7 +146,17 @@ func (r *Registry) resolveManifest(ctx context.Context, repo string, digest oci.
 	if !ok {
 		return oci.Descriptor{}, nil, oci.ErrManifestUnknown
 	}
+	removed, err := evicted(st.index, repo, "manifest", digest)
+	if err != nil {
+		return oci.Descriptor{}, nil, err
+	}
+	if removed {
+		return oci.Descriptor{}, nil, oci.ErrManifestUnknown
+	}
 	if err := ensureBlobExists(st.dir, digest); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return oci.Descriptor{}, nil, oci.ErrManifestUnknown
+		}
 		return oci.Descriptor{}, nil, err
 	}
 	return desc, st, nil

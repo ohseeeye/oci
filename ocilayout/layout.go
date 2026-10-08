@@ -37,6 +37,9 @@ const (
 
 // Options holds configuration for opening a layout registry.
 type Options struct {
+	// AllowSparseManifests permits missing children and independent eviction.
+	// Manifest structure and descriptors are still validated. Default false.
+	AllowSparseManifests bool
 	// DefaultRepo is used when reading layout entries whose
 	// org.opencontainers.image.ref.name annotation is empty or tag-only.
 	DefaultRepo string
@@ -62,6 +65,77 @@ type layoutState struct {
 
 type layoutVersionFile struct {
 	ImageLayoutVersion string `json:"imageLayoutVersion"`
+}
+
+// Logical eviction is repository-scoped: shared files remain available to
+// other repositories and existing readers. Physical garbage collection is separate.
+const evictedAnnotation = "io.github.ohseeeye.oci.evicted.v1"
+
+func evicted(index oci.IndexOrManifest, repo, kind string, digest oci.Digest) (bool, error) {
+	var entries map[string]map[string]bool
+	if value := index.Annotations[evictedAnnotation]; value != "" {
+		if err := json.Unmarshal([]byte(value), &entries); err != nil {
+			return false, fmt.Errorf("invalid eviction annotation: %w", err)
+		}
+	}
+	return entries[repo][kind+":"+digest.String()], nil
+}
+
+func setEvicted(index *oci.IndexOrManifest, repo, kind string, digest oci.Digest, removed bool) error {
+	entries := make(map[string]map[string]bool)
+	if value := index.Annotations[evictedAnnotation]; value != "" {
+		if err := json.Unmarshal([]byte(value), &entries); err != nil {
+			return fmt.Errorf("invalid eviction annotation: %w", err)
+		}
+		if entries == nil {
+			return fmt.Errorf("invalid eviction annotation: null store")
+		}
+	}
+	key := kind + ":" + digest.String()
+	if removed {
+		if entries[repo] == nil {
+			entries[repo] = make(map[string]bool)
+		}
+		entries[repo][key] = true
+	} else {
+		delete(entries[repo], key)
+		if len(entries[repo]) == 0 {
+			delete(entries, repo)
+		}
+	}
+	index.Annotations = cloneMap(index.Annotations)
+	if len(entries) == 0 {
+		delete(index.Annotations, evictedAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	index.Annotations[evictedAnnotation] = string(data)
+	return nil
+}
+
+func (r *Registry) restoreBlob(repo string, digest oci.Digest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st, err := r.layoutForRepoLocked(repo, true)
+	if err != nil {
+		return err
+	}
+	removed, err := evicted(st.index, repo, "blob", digest)
+	if err != nil || !removed {
+		return err
+	}
+	next := st.index
+	if err := setEvicted(&next, repo, "blob", digest, false); err != nil {
+		return err
+	}
+	if err := saveIndex(st.dir, next); err != nil {
+		return err
+	}
+	st.index = next
+	return nil
 }
 
 // New opens an OCI Image Layout registry rooted at dir.
@@ -214,10 +288,10 @@ func saveIndex(dir string, index oci.IndexOrManifest) error {
 		return err
 	}
 	tmp := filepath.Join(dir, "index.json.tmp")
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil { // #nosec G703 -- fixed index filename beneath the configured layout root.
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(dir, "index.json"))
+	return os.Rename(tmp, filepath.Join(dir, "index.json")) // #nosec G703 -- fixed index filenames beneath the configured layout root.
 }
 
 func emptyIndex() oci.IndexOrManifest {

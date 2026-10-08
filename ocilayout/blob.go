@@ -64,11 +64,11 @@ func writeBlob(dir string, desc oci.Descriptor, r io.Reader) (oci.Descriptor, er
 	} else if !os.IsNotExist(err) {
 		return oci.Descriptor{}, err
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "blobs", "uploads"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "blobs", "uploads"), 0o700); err != nil { // #nosec G703 -- fixed subdirectory beneath the configured layout root.
 		return oci.Descriptor{}, err
 	}
 	tmp := filepath.Join(dir, "blobs", "uploads", newUploadID())
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) // #nosec G703 -- generated upload ID beneath the configured layout root.
 	if err != nil {
 		return oci.Descriptor{}, err
 	}

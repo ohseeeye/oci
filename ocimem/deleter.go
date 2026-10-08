@@ -70,7 +70,12 @@ func (r *Registry) DeleteManifest(ctx context.Context, repoName string, digest o
 			return errCannotDeleteTaggedManifest
 		}
 	}
-	// TODO should this also delete any tags referring to this digest?
+	for tag, desc := range repo.tags {
+		if desc.Digest == digest {
+			delete(repo.tags, tag)
+			repo.recordTagEvent(tag, desc, oci.TagHistoryEventDeleted)
+		}
+	}
 	delete(repo.manifests, digest)
 	return nil
 }

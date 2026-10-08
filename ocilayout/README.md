@@ -100,3 +100,17 @@ References may include tags, digests, or both:
 ```go
 baseDir, ref, err := ocilayout.FindLayout("./layout/repo:tag@sha256:...")
 ```
+
+## Sparse manifests
+
+Set `Options.AllowSparseManifests` (or `PerRepoOptions.AllowSparseManifests`)
+to accept manifests before their child manifests or blobs arrive. It defaults to
+false. Manifest structure and descriptors are still validated, and absent child
+content returns not found until uploaded. This is useful for read-through caches.
+
+Sparse mode also permits independent eviction of referenced children. Deletion
+records repository-scoped markers in the custom top-level index annotation
+`io.github.ohseeeye.oci.evicted.v1`; pushing or mounting content restores it.
+Physical files are retained for existing readers and other repositories, so
+logical eviction does not reclaim disk space. Tools that strip the annotation
+lose these deletion markers. Garbage collection remains separate.

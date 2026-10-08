@@ -456,3 +456,63 @@ func mapKeys[V any](m map[string]V) []string {
 	slices.Sort(keys)
 	return keys
 }
+
+// CheckSparseManifests checks out-of-order publication and independent eviction.
+// r must have AllowSparseManifests enabled.
+func CheckSparseManifests(t *testing.T, r oci.Registry) {
+	t.Helper()
+	ctx := t.Context()
+	const repo = "sparse/app"
+	blob := []byte("config content")
+	config := oci.Descriptor{MediaType: oci.MediaTypeImageConfig, Digest: ocidigest.FromBytes(blob), Size: int64(len(blob))}
+	data, err := json.Marshal(oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageManifest, Config: &config, Layers: []oci.Descriptor{}})
+	require.NoError(t, err)
+	child := oci.Descriptor{MediaType: oci.MediaTypeImageManifest, Digest: ocidigest.FromBytes(data), Size: int64(len(data))}
+	index, err := json.Marshal(oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex, Manifests: []oci.Descriptor{child}})
+	require.NoError(t, err)
+	parent, err := r.PushManifest(ctx, repo, index, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}})
+	require.NoError(t, err)
+	_, err = r.ResolveManifest(ctx, repo, child.Digest)
+	require.ErrorIs(t, err, oci.ErrManifestUnknown)
+	_, err = r.GetManifest(ctx, repo, child.Digest)
+	require.ErrorIs(t, err, oci.ErrManifestUnknown)
+	_, err = r.PushManifest(ctx, repo, data, child.MediaType, &oci.PushManifestParameters{Tags: []string{"child"}})
+	require.NoError(t, err)
+	_, err = r.ResolveBlob(ctx, repo, config.Digest)
+	require.ErrorIs(t, err, oci.ErrBlobUnknown)
+	_, err = r.PushBlob(ctx, repo, config, bytes.NewReader(blob))
+	require.NoError(t, err)
+	require.NoError(t, r.DeleteBlob(ctx, repo, config.Digest))
+	_, err = r.ResolveBlob(ctx, repo, config.Digest)
+	require.ErrorIs(t, err, oci.ErrBlobUnknown)
+	require.NoError(t, r.DeleteManifest(ctx, repo, child.Digest))
+	_, err = r.ResolveTag(ctx, repo, "child")
+	require.ErrorIs(t, err, oci.ErrManifestUnknown, "evicting a manifest also removes its tags")
+	_, err = r.ResolveManifest(ctx, repo, child.Digest)
+	require.ErrorIs(t, err, oci.ErrManifestUnknown)
+	reader, err := r.GetManifest(ctx, repo, parent.Digest)
+	require.NoError(t, err)
+	got, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	require.Equal(t, index, got)
+	_, err = r.PushManifest(ctx, repo, data, child.MediaType, nil)
+	require.NoError(t, err)
+	_, err = r.PushBlob(ctx, repo, config, bytes.NewReader(blob))
+	require.NoError(t, err)
+	_, err = r.ResolveManifest(ctx, repo, child.Digest)
+	require.NoError(t, err)
+	_, err = r.ResolveBlob(ctx, repo, config.Digest)
+	require.NoError(t, err)
+	_, err = r.PushManifest(ctx, repo, data, child.MediaType, &oci.PushManifestParameters{Digest: parent.Digest})
+	require.Error(t, err, "digest validation is still required")
+	for _, invalid := range []string{
+		`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","layers":[]}`,
+		strings.Replace(string(data), config.Digest.String(), "sha256:invalid", 1),
+		strings.Replace(string(data), fmt.Sprintf(`"size":%d`, config.Size), `"size":-1`, 1),
+		strings.Replace(string(data), config.MediaType, "", 1),
+	} {
+		_, err = r.PushManifest(ctx, repo, []byte(invalid), child.MediaType, nil)
+		require.Error(t, err, "sparse mode must retain validation: %s", invalid)
+	}
+}

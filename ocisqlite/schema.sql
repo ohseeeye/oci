@@ -1,4 +1,4 @@
--- Schema version 1. Content lives in blobs/<algorithm>/<encoded digest>.
+-- Schema version 2. Content lives in blobs/<algorithm>/<encoded digest>.
 CREATE TABLE repository (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -33,8 +33,7 @@ CREATE TABLE manifest_blob (
     manifest TEXT NOT NULL,
     blob_digest TEXT NOT NULL,
     PRIMARY KEY (repository_id, manifest, blob_digest),
-    FOREIGN KEY (repository_id, manifest) REFERENCES manifests(repository_id, digest) ON DELETE CASCADE,
-    FOREIGN KEY (repository_id, blob_digest) REFERENCES repository_blob(repository_id, digest)
+    FOREIGN KEY (repository_id, manifest) REFERENCES manifests(repository_id, digest) ON DELETE CASCADE
 );
 CREATE INDEX manifest_blob_digest ON manifest_blob(repository_id, blob_digest);
 CREATE TABLE manifest_manifest (
@@ -42,8 +41,7 @@ CREATE TABLE manifest_manifest (
     manifest TEXT NOT NULL,
     child_digest TEXT NOT NULL,
     PRIMARY KEY (repository_id, manifest, child_digest),
-    FOREIGN KEY (repository_id, manifest) REFERENCES manifests(repository_id, digest) ON DELETE CASCADE,
-    FOREIGN KEY (repository_id, child_digest) REFERENCES manifests(repository_id, digest)
+    FOREIGN KEY (repository_id, manifest) REFERENCES manifests(repository_id, digest) ON DELETE CASCADE
 );
 CREATE INDEX manifest_manifest_child ON manifest_manifest(repository_id, child_digest);
 CREATE TABLE manifest_annotations (
@@ -84,4 +82,4 @@ CREATE TABLE upload (
     last_upload_at INTEGER NOT NULL
 );
 CREATE INDEX upload_repository ON upload(repository_id);
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
