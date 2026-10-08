@@ -42,7 +42,7 @@ jobs:
       - name: Run OCI distribution conformance tests
         env:
           OCI_CONFORMANCE_RESULTS: ${{ github.workspace }}/results
-        run: go test -tags=integration ./ocimem ./ocilayout -run TestOCIConformance -count=1 -v
+        run: go test -tags=integration ./ocimem ./ocilayout ./ocimiddleware -run TestOCIConformance -count=1 -v
 
       - name: Run SQLite OCI distribution conformance tests
         working-directory: ocisqlite
