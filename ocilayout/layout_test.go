@@ -328,3 +328,29 @@ func all[T any](t *testing.T, seq iter.Seq2[T, error]) []T {
 	require.NoError(t, err)
 	return xs
 }
+
+func TestSparseManifests(t *testing.T) {
+	t.Run("shared", func(t *testing.T) {
+		dir := t.TempDir()
+		r, err := New(dir, &Options{AllowSparseManifests: true})
+		require.NoError(t, err)
+		ocitest.CheckSparseManifests(t, r)
+		blob := pushTestBlob(t.Context(), t, r, "other/app", []byte("shared content"))
+		require.NoError(t, r.DeleteBlob(t.Context(), "sparse/app", blob.Digest))
+		r, err = New(dir, &Options{AllowSparseManifests: true})
+		require.NoError(t, err)
+		_, err = r.ResolveBlob(t.Context(), "sparse/app", blob.Digest)
+		require.ErrorIs(t, err, oci.ErrBlobUnknown, "eviction persists across reopen")
+		_, err = r.ResolveBlob(t.Context(), "other/app", blob.Digest)
+		require.NoError(t, err, "eviction is scoped to repository")
+		_, err = r.MountBlob(t.Context(), "other/app", "sparse/app", blob.Digest)
+		require.NoError(t, err)
+		_, err = r.ResolveBlob(t.Context(), "sparse/app", blob.Digest)
+		require.NoError(t, err, "mount restores evicted membership")
+	})
+	t.Run("per repository", func(t *testing.T) {
+		r, err := NewPerRepository(t.TempDir(), &PerRepoOptions{AllowSparseManifests: true})
+		require.NoError(t, err)
+		ocitest.CheckSparseManifests(t, r)
+	})
+}

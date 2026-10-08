@@ -83,6 +83,9 @@ func NewWithConfig(cfg0 *Config) *Registry {
 
 // Config holds configuration for the registry.
 type Config struct {
+	// AllowSparseManifests permits missing children while retaining validation
+	// of the manifest and its descriptors. The default is false.
+	AllowSparseManifests bool
 	// ImmutableTags specifies that tags in the registry cannot
 	// be changed. Specifically the following restrictions are enforced:
 	// - no removal of tags from a manifest
@@ -98,6 +101,7 @@ type Config struct {
 	// manifests and by manifests (indexes) to other manifests, but not
 	// subject references, because the spec defines those to be always
 	// lax.
+	// Deprecated: use AllowSparseManifests.
 	LaxChildReferences bool
 }
 

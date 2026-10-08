@@ -34,7 +34,7 @@ import (
 
 // NewPerRepository opens an OCI Image Layout registry that stores each
 // repository in a separate OCI layout under dir.
-func NewPerRepository(dir string, _ *PerRepoOptions) (oci.Registry, error) {
+func NewPerRepository(dir string, opts *PerRepoOptions) (oci.Registry, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("directory must not be empty")
 	}
@@ -42,21 +42,30 @@ func NewPerRepository(dir string, _ *PerRepoOptions) (oci.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	var sparse bool
+	if opts != nil {
+		sparse = opts.AllowSparseManifests
+	}
 	return &perRepositoryRegistry{
-		dir:    abs,
-		layout: make(map[string]*repoLayout),
+		allowSparseManifests: sparse,
+		dir:                  abs,
+		layout:               make(map[string]*repoLayout),
 	}, nil
 }
 
 // PerRepoOptions holds configuration for opening a per-repository layout
 // registry.
-type PerRepoOptions struct{}
+type PerRepoOptions struct {
+	// AllowSparseManifests has the same meaning as Options.AllowSparseManifests.
+	AllowSparseManifests bool
+}
 
 type perRepositoryRegistry struct {
 	*oci.Funcs
-	mu     sync.Mutex
-	dir    string
-	layout map[string]*repoLayout
+	mu                   sync.Mutex
+	dir                  string
+	layout               map[string]*repoLayout
+	allowSparseManifests bool
 }
 
 var _ oci.Registry = (*perRepositoryRegistry)(nil)
@@ -263,7 +272,7 @@ func (r *perRepositoryRegistry) openRepoLayout(repo string) (*repoLayout, error)
 	if layout := r.layout[repo]; layout != nil {
 		return layout, nil
 	}
-	opts := Options{DefaultRepo: repo}
+	opts := Options{DefaultRepo: repo, AllowSparseManifests: r.allowSparseManifests}
 	raw, err := New(filepath.Join(r.dir, filepath.FromSlash(repo)), &opts) // #nosec G305 -- repo has been validated as an OCI repository name.
 	if err != nil {
 		return nil, err

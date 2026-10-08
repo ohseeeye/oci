@@ -18,6 +18,7 @@ import (
 	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 func newRegistry(t *testing.T, dir string) *Registry {
@@ -319,8 +320,95 @@ func TestOpenValidation(t *testing.T) {
 	dir := t.TempDir()
 	r, err := New(dir, &Options{PoolSize: 1})
 	require.NoError(t, err)
-	require.NoError(t, r.withConn(t.Context(), true, func(conn *sqlite.Conn) error { return execute(conn, "PRAGMA user_version=2") }))
+	require.NoError(t, r.withConn(t.Context(), true, func(conn *sqlite.Conn) error { return execute(conn, "PRAGMA user_version=3") }))
 	require.NoError(t, r.Close())
 	_, err = New(dir, nil)
 	require.ErrorContains(t, err, "unsupported metadata schema version")
+}
+
+func TestSparseManifests(t *testing.T) {
+	r, err := New(t.TempDir(), &Options{AllowSparseManifests: true})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	ocitest.CheckSparseManifests(t, r)
+}
+
+func TestMigrateSparseSchema(t *testing.T) {
+	dir := t.TempDir()
+	r, err := New(dir, nil)
+	require.NoError(t, err)
+	blob := pushBlob(t, r, "app", "config")
+	data := manifestBytes(t, oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageManifest, Config: &blob, Layers: []oci.Descriptor{}})
+	child, err := r.PushManifest(t.Context(), "app", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"child"}})
+	require.NoError(t, err)
+	index := manifestBytes(t, oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex, Manifests: []oci.Descriptor{child}, Annotations: map[string]string{"example": "preserved"}})
+	parent, err := r.PushManifest(t.Context(), "app", index, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}})
+	require.NoError(t, err)
+	// Recreate the original child constraints with existing relationships, then
+	// reopen through New to exercise a real version-one database upgrade.
+	require.NoError(t, r.withConn(t.Context(), true, func(conn *sqlite.Conn) error {
+		return sqlitex.ExecuteScript(conn, `
+CREATE TABLE old_manifest_blob (
+ repository_id INTEGER NOT NULL, manifest TEXT NOT NULL, blob_digest TEXT NOT NULL,
+ PRIMARY KEY(repository_id,manifest,blob_digest),
+ FOREIGN KEY(repository_id,manifest) REFERENCES manifests(repository_id,digest) ON DELETE CASCADE,
+ FOREIGN KEY(repository_id,blob_digest) REFERENCES repository_blob(repository_id,digest)
+);
+INSERT INTO old_manifest_blob SELECT * FROM manifest_blob;
+DROP TABLE manifest_blob;
+ALTER TABLE old_manifest_blob RENAME TO manifest_blob;
+CREATE INDEX manifest_blob_digest ON manifest_blob(repository_id,blob_digest);
+CREATE TABLE old_manifest_manifest (
+ repository_id INTEGER NOT NULL, manifest TEXT NOT NULL, child_digest TEXT NOT NULL,
+ PRIMARY KEY(repository_id,manifest,child_digest),
+ FOREIGN KEY(repository_id,manifest) REFERENCES manifests(repository_id,digest) ON DELETE CASCADE,
+ FOREIGN KEY(repository_id,child_digest) REFERENCES manifests(repository_id,digest)
+);
+INSERT INTO old_manifest_manifest SELECT * FROM manifest_manifest;
+DROP TABLE manifest_manifest;
+ALTER TABLE old_manifest_manifest RENAME TO manifest_manifest;
+CREATE INDEX manifest_manifest_child ON manifest_manifest(repository_id,child_digest);
+PRAGMA user_version=1;
+`, nil)
+	}))
+	require.NoError(t, r.Close())
+	r, err = New(dir, nil)
+	require.NoError(t, err)
+	got, err := r.ResolveTag(t.Context(), "app", "latest")
+	require.NoError(t, err)
+	require.Equal(t, parent.Digest, got.Digest)
+	reader, err := r.GetManifest(t.Context(), "app", parent.Digest)
+	require.Equal(t, index, readContent(t, reader, err))
+	history, err := oci.All(r.TagHistory(t.Context(), "app", "latest", nil))
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	require.ErrorIs(t, r.DeleteBlob(t.Context(), "app", blob.Digest), oci.ErrDenied)
+	require.ErrorIs(t, r.DeleteManifest(t.Context(), "app", child.Digest), oci.ErrDenied)
+	require.NoError(t, r.withConn(t.Context(), false, func(conn *sqlite.Conn) error {
+		version, err := integer(conn, "PRAGMA user_version")
+		require.NoError(t, err)
+		require.EqualValues(t, 2, version)
+		blobs, err := integer(conn, "SELECT count(*) FROM manifest_blob")
+		require.NoError(t, err)
+		require.EqualValues(t, 1, blobs)
+		manifests, err := integer(conn, "SELECT count(*) FROM manifest_manifest")
+		require.NoError(t, err)
+		require.EqualValues(t, 1, manifests)
+		return rows(conn, "PRAGMA foreign_key_check", func(*sqlite.Stmt) error {
+			t.Error("foreign key violation after migration")
+			return nil
+		})
+	}))
+	require.NoError(t, r.Close())
+	r, err = New(dir, &Options{AllowSparseManifests: true})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	require.NoError(t, r.DeleteManifest(t.Context(), "app", child.Digest))
+	require.NoError(t, r.DeleteBlob(t.Context(), "app", blob.Digest))
+	reader, err = r.GetManifest(t.Context(), "app", parent.Digest)
+	require.Equal(t, index, readContent(t, reader, err))
+	// Strict mode still checks relationships after the schema migration.
+	strict := newRegistry(t, dir)
+	_, err = strict.PushManifest(t.Context(), "app", index, oci.MediaTypeImageIndex, nil)
+	require.ErrorIs(t, err, oci.ErrManifestInvalid)
 }

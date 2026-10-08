@@ -19,8 +19,35 @@ import (
 //go:embed schema.sql
 var schema string
 
+// Keep parent foreign keys while allowing child content to arrive or be evicted
+// independently. Strict registries still validate children in their transaction.
+const sparseMigration = `
+CREATE TABLE manifest_blob_v2 (
+ repository_id INTEGER NOT NULL, manifest TEXT NOT NULL, blob_digest TEXT NOT NULL,
+ PRIMARY KEY(repository_id,manifest,blob_digest),
+ FOREIGN KEY(repository_id,manifest) REFERENCES manifests(repository_id,digest) ON DELETE CASCADE
+);
+INSERT INTO manifest_blob_v2 SELECT * FROM manifest_blob;
+DROP TABLE manifest_blob;
+ALTER TABLE manifest_blob_v2 RENAME TO manifest_blob;
+CREATE INDEX manifest_blob_digest ON manifest_blob(repository_id,blob_digest);
+CREATE TABLE manifest_manifest_v2 (
+ repository_id INTEGER NOT NULL, manifest TEXT NOT NULL, child_digest TEXT NOT NULL,
+ PRIMARY KEY(repository_id,manifest,child_digest),
+ FOREIGN KEY(repository_id,manifest) REFERENCES manifests(repository_id,digest) ON DELETE CASCADE
+);
+INSERT INTO manifest_manifest_v2 SELECT * FROM manifest_manifest;
+DROP TABLE manifest_manifest;
+ALTER TABLE manifest_manifest_v2 RENAME TO manifest_manifest;
+CREATE INDEX manifest_manifest_child ON manifest_manifest(repository_id,child_digest);
+PRAGMA user_version=2;
+`
+
 // Options configures a registry's SQLite connection pool.
 type Options struct {
+	// AllowSparseManifests permits missing children and independent eviction.
+	// Manifest structure and descriptors are still validated. Default false.
+	AllowSparseManifests bool
 	// PoolSize defaults to four when zero. Negative values are invalid.
 	PoolSize int
 }
@@ -29,8 +56,9 @@ type Options struct {
 // Close releases its database connections. Blob readers own their file handles.
 type Registry struct {
 	*oci.Funcs
-	dir  string
-	pool *sqlitex.Pool
+	dir                  string
+	pool                 *sqlitex.Pool
+	allowSparseManifests bool
 }
 
 var _ oci.Registry = (*Registry)(nil)
@@ -84,6 +112,9 @@ func New(dir string, opts *Options) (*Registry, error) {
 		return nil, err
 	}
 	r := &Registry{dir: abs, pool: pool}
+	if opts != nil {
+		r.allowSparseManifests = opts.AllowSparseManifests
+	}
 	err = r.withConn(context.Background(), true, func(conn *sqlite.Conn) error {
 		version, err := integer(conn, "PRAGMA user_version")
 		if err != nil {
@@ -93,6 +124,8 @@ func New(dir string, opts *Options) (*Registry, error) {
 		case 0:
 			return sqlitex.ExecuteScript(conn, schema, nil)
 		case 1:
+			return sqlitex.ExecuteScript(conn, sparseMigration, nil)
+		case 2:
 			return nil
 		default:
 			return fmt.Errorf("unsupported metadata schema version %d", version)

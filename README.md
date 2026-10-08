@@ -59,6 +59,14 @@ concurrent writers. Memory and layout backends support the condition; HTTP
 clients forward it after discovering a digest ETag on a tag GET or HEAD.
 Middleware forwards it to storage. Other implementations may ignore it.
 
+## Sparse manifests
+
+Memory, layout (including per-repository layouts), and SQLite backends expose
+`AllowSparseManifests` in their constructor options. It defaults to false. Enable
+it to accept manifests before their child content arrives and to evict referenced
+children independently. Manifest structure, descriptors, and digests are still
+validated; missing children return not found until uploaded.
+
 ## Usage
 
 ### List tags on Docker Hub

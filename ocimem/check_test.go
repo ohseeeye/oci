@@ -846,3 +846,7 @@ func TestTagsLimit(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestSparseManifests(t *testing.T) {
+	ocitest.CheckSparseManifests(t, NewWithConfig(&Config{AllowSparseManifests: true}))
+}

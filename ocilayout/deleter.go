@@ -30,6 +30,23 @@ func (r *Registry) DeleteBlob(ctx context.Context, repo string, digest oci.Diges
 	if _, _, err := r.resolveBlob(ctx, repo, digest); err != nil {
 		return err
 	}
+	if r.opts.AllowSparseManifests {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		st, err := r.layoutForRepoLocked(repo, false)
+		if err != nil {
+			return err
+		}
+		next := st.index
+		if err := setEvicted(&next, repo, "blob", digest, true); err != nil {
+			return err
+		}
+		if err := saveIndex(st.dir, next); err != nil {
+			return err
+		}
+		st.index = next
+		return nil
+	}
 	return fmt.Errorf("%w: blob garbage collection is not implemented", oci.ErrDenied)
 }
 
@@ -52,7 +69,14 @@ func (r *Registry) DeleteManifest(ctx context.Context, repo string, digest oci.D
 		return oci.ErrNameUnknown
 	}
 	found := false
-	out := st.index.Manifests[:0]
+	if r.opts.AllowSparseManifests {
+		manifests, err := r.reachable(st, repo)
+		if err != nil {
+			return err
+		}
+		_, found = manifests[digest]
+	}
+	out := make([]oci.Descriptor, 0, len(st.index.Manifests))
 	for _, desc := range st.index.Manifests {
 		match, err := r.refDescriptorMatches(repo, "", digest, desc)
 		if err != nil {
@@ -67,8 +91,18 @@ func (r *Registry) DeleteManifest(ctx context.Context, repo string, digest oci.D
 	if !found {
 		return oci.ErrManifestUnknown
 	}
-	st.index.Manifests = out
-	return saveIndex(st.dir, st.index)
+	next := st.index
+	next.Manifests = out
+	if r.opts.AllowSparseManifests {
+		if err := setEvicted(&next, repo, "manifest", digest, true); err != nil {
+			return err
+		}
+	}
+	if err := saveIndex(st.dir, next); err != nil {
+		return err
+	}
+	st.index = next
+	return nil
 }
 
 // DeleteTag deletes the given tag from the named repository.

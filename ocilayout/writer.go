@@ -40,7 +40,11 @@ func (r *Registry) PushBlob(ctx context.Context, repo string, desc oci.Descripto
 	if err != nil {
 		return oci.Descriptor{}, err
 	}
-	return writeBlob(st.dir, desc, content)
+	desc, err = writeBlob(st.dir, desc, content)
+	if err != nil {
+		return oci.Descriptor{}, err
+	}
+	return desc, r.restoreBlob(repo, desc.Digest)
 }
 
 // PushBlobChunked starts a chunked blob upload to the given repository.
@@ -83,6 +87,7 @@ func (r *Registry) PushBlobChunkedResume(ctx context.Context, repo string, id st
 		return nil, fmt.Errorf("invalid upload offset %d; actual offset %d: %w", offset, info.Size(), oci.ErrRangeInvalid)
 	}
 	return &blobWriter{
+		repo:      repo,
 		registry:  r,
 		layoutDir: st.dir,
 		id:        id,
@@ -106,7 +111,7 @@ func (r *Registry) MountBlob(ctx context.Context, fromRepo, toRepo string, dig o
 		return oci.Descriptor{}, err
 	}
 	if fromLayout.dir == toLayout.dir {
-		return desc, nil
+		return desc, r.restoreBlob(toRepo, dig)
 	}
 	src, err := blobPath(fromLayout.dir, dig)
 	if err != nil {
@@ -117,7 +122,7 @@ func (r *Registry) MountBlob(ctx context.Context, fromRepo, toRepo string, dig o
 		return oci.Descriptor{}, err
 	}
 	defer in.Close()
-	return writeBlob(toLayout.dir, desc, in)
+	return r.PushBlob(ctx, toRepo, desc, in)
 }
 
 // PushManifest pushes a manifest to the named repository, optionally tagging it.
@@ -174,7 +179,7 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	if err != nil {
 		return oci.Descriptor{}, err
 	}
-	if err := r.checkManifestReferences(st, mediaType, data); err != nil {
+	if err := r.checkManifestReferences(st, repo, mediaType, data); err != nil {
 		return oci.Descriptor{}, fmt.Errorf("%w: %v", oci.ErrManifestInvalid, err)
 	}
 	if _, err := writeBlobBytes(st.dir, desc, data); err != nil {
@@ -183,6 +188,12 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	// Update references and history together in the single index.json write.
 	next := *st
 	next.index.Manifests = slices.Clone(st.index.Manifests)
+	if err := setEvicted(&next.index, repo, "manifest", desc.Digest, false); err != nil {
+		return oci.Descriptor{}, err
+	}
+	if err := setEvicted(&next.index, repo, "blob", desc.Digest, false); err != nil {
+		return oci.Descriptor{}, err
+	}
 	if len(tags) == 0 {
 		r.upsertManifestRef(&next, repo, "", desc)
 	} else {
@@ -200,22 +211,33 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	return desc, nil
 }
 
-func (r *Registry) checkManifestReferences(st *layoutState, mediaType string, data []byte) error {
+func (r *Registry) checkManifestReferences(st *layoutState, repo, mediaType string, data []byte) error {
 	info, err := manifestInfoFromBytes(mediaType, data)
 	if err != nil {
 		return err
 	}
+	if r.opts.AllowSparseManifests {
+		return nil
+	}
 	for _, child := range info.descriptors {
+		kind := "blob"
+		if child.kind == kindManifest {
+			kind = "manifest"
+		}
+		removed, err := evicted(st.index, repo, kind, child.desc.Digest)
+		if err != nil {
+			return err
+		}
 		switch child.kind {
 		case kindBlob:
 			if len(child.desc.URLs) > 0 {
 				continue
 			}
-			if err := ensureBlobExists(st.dir, child.desc.Digest); err != nil {
+			if err := ensureBlobExists(st.dir, child.desc.Digest); err != nil || removed {
 				return fmt.Errorf("blob for %s not found", child.name)
 			}
 		case kindManifest:
-			if err := ensureBlobExists(st.dir, child.desc.Digest); err != nil {
+			if err := ensureBlobExists(st.dir, child.desc.Digest); err != nil || removed {
 				return fmt.Errorf("manifest for %s not found", child.name)
 			}
 		case kindSubjectManifest:
@@ -286,6 +308,7 @@ func cloneMap(m map[string]string) map[string]string {
 }
 
 type blobWriter struct {
+	repo      string
 	registry  *Registry
 	layoutDir string
 	id        string
@@ -346,7 +369,7 @@ func (w *blobWriter) Commit(digest oci.Digest) (oci.Descriptor, error) {
 		return oci.Descriptor{}, err
 	}
 	_ = os.Remove(w.path)
-	return desc, nil
+	return desc, w.registry.restoreBlob(w.repo, digest)
 }
 
 func (w *blobWriter) Cancel() error {

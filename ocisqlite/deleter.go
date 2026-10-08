@@ -10,7 +10,8 @@ import (
 )
 
 // DeleteBlob removes repository membership. Content files are retained for
-// readers and other repositories. Referenced blobs and manifests are protected.
+// readers and other repositories. Referenced blobs are protected unless sparse
+// manifests are enabled. Manifest backing blobs are always protected.
 func (r *Registry) DeleteBlob(ctx context.Context, repo string, digest oci.Digest) error {
 	return r.withConn(ctx, true, func(conn *sqlite.Conn) error {
 		id, err := repository(conn, repo, false)
@@ -24,15 +25,23 @@ func (r *Registry) DeleteBlob(ctx context.Context, repo string, digest oci.Diges
 		if err != nil {
 			return err
 		}
-		if n > 0 {
+		if n > 0 && !r.allowSparseManifests {
 			return fmt.Errorf("%w: blob is referenced by a manifest", oci.ErrDenied)
+		}
+		// A manifest's own backing blob cannot be removed independently.
+		own, err := integer(conn, "SELECT count(*) FROM manifests WHERE repository_id=? AND digest=?", id, digest.String())
+		if err != nil {
+			return err
+		}
+		if own > 0 {
+			return fmt.Errorf("%w: blob stores a manifest", oci.ErrDenied)
 		}
 		return execute(conn, "DELETE FROM repository_blob WHERE repository_id=? AND digest=?", id, digest.String())
 	})
 }
 
 // DeleteManifest removes a manifest and its tags, preserving tag history.
-// A manifest referenced by an index cannot be deleted until the index is removed.
+// A manifest referenced by an index is protected unless sparse manifests are enabled.
 func (r *Registry) DeleteManifest(ctx context.Context, repo string, digest oci.Digest) error {
 	return r.withConn(ctx, true, func(conn *sqlite.Conn) error {
 		id, err := repository(conn, repo, false)
@@ -47,7 +56,7 @@ func (r *Registry) DeleteManifest(ctx context.Context, repo string, digest oci.D
 		if err != nil {
 			return err
 		}
-		if n > 0 {
+		if n > 0 && !r.allowSparseManifests {
 			return fmt.Errorf("%w: manifest is referenced by an index", oci.ErrDenied)
 		}
 		if err := rows(conn, "SELECT artifact_type FROM manifests WHERE repository_id=? AND digest=?", func(s *sqlite.Stmt) error { desc.ArtifactType = s.ColumnText(0); return nil }, id, digest.String()); err != nil {
