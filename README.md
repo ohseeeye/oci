@@ -43,7 +43,7 @@ has its own module. External dependencies in the core module support tests.
 | `pkg/ociauth` | Authentication transport implementing the Docker/OCI token flow, plus helpers for loading credentials from Docker config files. |
 | `pkg/ocidigest` | OCI-compatible content digest calculation, validation, and streaming verification. |
 | `pkg/ociref` | OCI reference parsing, validation, and normalization. |
-| `pkg/ocitransfer` | Streaming blob transfers through `oci.Reader` and `oci.Writer`, with adaptive parallel downloads and sequential chunked uploads. |
+| `pkg/ocitransfer` | Image, index, artifact, and repository copies, plus streaming blob transfers with parallel downloads and sequential chunked uploads. |
 
 `oci.TagHistory` is a separate, experimental capability that callers can check
 with a type assertion on an `oci.Registry`. `ocimem`, `ocilayout`, and `ocisqlite` implement it,
@@ -220,7 +220,8 @@ func main() {
 ### Transfer blobs
 
 See the [ocitransfer README](./pkg/ocitransfer/README.md) for streaming upload and
-parallel download examples using any `oci.Reader` or `oci.Writer`.
+parallel download examples, plus `Copy` for a tag or digest and `CopyRepository`
+for every tag in a repository.
 
 ### Serve a local in-memory registry over HTTP
 

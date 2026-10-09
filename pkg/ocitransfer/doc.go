@@ -1,4 +1,6 @@
-// Package ocitransfer provides streaming blob transfers through oci.Reader and
-// oci.Writer implementations. Downloads use parallel range reads and verify
-// content at EOF. Uploads write sequential chunks and commit their digest.
+// Package ocitransfer copies images, indexes, artifacts, and tagged repositories,
+// and provides streaming blob transfers through OCI reader/writer interfaces.
+// Downloads use parallel range reads and verify content at EOF. Uploads write
+// sequential chunks and commit their digest. Copies preserve content digests and
+// publish dependencies before parents.
 package ocitransfer
