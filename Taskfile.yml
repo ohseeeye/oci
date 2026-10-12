@@ -60,7 +60,7 @@ tasks:
     env:
       OCI_CONFORMANCE_RESULTS: '{{.ROOT_DIR}}/results'
     cmds:
-      - go test -tags=integration ./ocimem ./ocilayout -run TestOCIConformance -count=1 -v
+      - go test -tags=integration ./ocimem ./ocilayout ./ocimiddleware -run TestOCIConformance -count=1 -v
       - task: conformance:ocisqlite
 
   conformance:ocimem:

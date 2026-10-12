@@ -35,7 +35,7 @@ has its own module. External dependencies in the core module support tests.
 | `ocilayout` | Filesystem-backed `oci.Registry` implementation for OCI Image Layout directories, including shared and per-repository layouts. |
 | [`ocisqlite`](./ocisqlite/README.md) | Persistent registry with SQLite metadata and shared blob files; a separate Go module. |
 | `ocimem` | Lightweight in-memory `oci.Registry` implementation, useful for testing and caching. |
-| `ocimiddleware` | Registry wrappers for read-only and immutable views, namespace prefixes, access control, repository routing, and operation logging. |
+| [`ocimiddleware`](./ocimiddleware/README.md) | Registry wrappers for read-only and immutable views, namespace prefixes, access control, repository routing, read-through caching, and operation logging. |
 | `ociserver` | HTTP server that serves the OCI distribution protocol on top of any `oci.Registry`. |
 | `ociunify` | Combines two registries into a single unified `oci.Registry`, with configurable read policy. |
 | `pkg/dockerhub` | Docker Hub hostnames for reference normalization, registry connections, and credential lookup. |
@@ -66,6 +66,18 @@ Memory, layout (including per-repository layouts), and SQLite backends expose
 it to accept manifests before their child content arrives and to evict referenced
 children independently. Manifest structure, descriptors, and digests are still
 validated; missing children return not found until uploaded.
+
+## Pull-through caching
+
+Wrap an upstream registry with `ocimiddleware.Cache(upstream, cache, options)`. Enable
+`AllowSparseManifests` on the cache backend so manifests can arrive before their
+children. Memory, layout (including per-repository layouts), and SQLite backends
+support this option; it defaults to false and retains manifest validation.
+
+Digest content is cached automatically. Tags always resolve upstream unless
+`ocimiddleware.CacheOptions.CacheTags` is enabled; tag expiration belongs to the backend.
+Listings and referrers always go upstream. See [cache middleware](./ocimiddleware/README.md#cache)
+for lifecycle, invalidation, and configuration details.
 
 ## Usage
 
