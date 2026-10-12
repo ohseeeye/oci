@@ -2,17 +2,23 @@ package ocimiddleware_test
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ohseeeye/oci"
 	"github.com/ohseeeye/oci/ociclient"
@@ -183,6 +189,187 @@ func TestTagPolicy(t *testing.T) {
 			require.ErrorIs(t, err, oci.ErrUnsupported)
 		})
 	}
+}
+
+func TestTagNetworkFallback(t *testing.T) {
+	for _, backend := range []string{"memory", "layout"} {
+		t.Run(backend, func(t *testing.T) {
+			var cache oci.Registry = sparse()
+			if backend == "layout" {
+				var err error
+				cache, err = ocilayout.New(t.TempDir(), &ocilayout.Options{AllowSparseManifests: true})
+				require.NoError(t, err)
+			}
+			upstream := ocimem.New()
+			first, _ := pushIndex(t, upstream, "latest", "first")
+			handler, err := ociserver.New(upstream, nil)
+			require.NoError(t, err)
+			server := httptest.NewServer(handler)
+			t.Cleanup(server.Close)
+			client, err := ociclient.New(strings.TrimPrefix(server.URL, "http://"), &ociclient.Options{Insecure: true})
+			require.NoError(t, err)
+			var reports []error
+			opts := &ocimiddleware.CacheOptions{FallbackTagsOnError: true, OnError: func(err error) { reports = append(reports, err) }}
+			r := wrap(t, client, cache, opts)
+			got, err := r.ResolveTag(t.Context(), "app", "latest")
+			require.NoError(t, err)
+			require.Equal(t, first.Digest, got.Digest)
+			second, data := pushIndex(t, upstream, "latest", "second")
+			got, err = r.ResolveTag(t.Context(), "app", "latest")
+			require.NoError(t, err)
+			require.Equal(t, second.Digest, got.Digest, "healthy lookups must still see upstream changes")
+			require.Empty(t, reports)
+			server.Close()
+			// A new wrapper must recover the saved assignment from the backend.
+			r = wrap(t, client, cache, opts)
+			got, err = r.ResolveTag(t.Context(), "app", "latest")
+			require.NoError(t, err)
+			require.Equal(t, second.Digest, got.Digest)
+			reader, err := r.GetTag(t.Context(), "app", "latest")
+			require.Equal(t, data, content(t, reader, err))
+			require.Len(t, reports, 2)
+			_, err = r.ResolveTag(t.Context(), "app", "uncached")
+			require.Error(t, err, "an outage cannot supply an uncached tag")
+			_, err = wrap(t, client, cache, nil).ResolveTag(t.Context(), "app", "latest")
+			require.Error(t, err, "fallback is opt-in")
+		})
+	}
+}
+
+func TestTagFallbackErrors(t *testing.T) {
+	connectionErr := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	for _, test := range []struct {
+		name     string
+		err      error
+		fallback bool
+	}{
+		{"connection refused", connectionErr, true},
+		{"wrapped connection", &url.Error{Op: "Head", URL: "https://registry.test", Err: connectionErr}, true},
+		{"dns", &net.DNSError{Err: "unavailable", Name: "registry.test"}, true},
+		{"transport timeout", context.DeadlineExceeded, true},
+		{"eof", io.EOF, true},
+		{"unexpected eof", io.ErrUnexpectedEOF, true},
+		{"not found", oci.ErrManifestUnknown, false},
+		{"repository missing", oci.ErrNameUnknown, false},
+		{"unauthorized", oci.ErrUnauthorized, false},
+		{"denied", oci.ErrDenied, false},
+		{"http unauthorized", oci.NewHTTPError(oci.ErrUnauthorized, http.StatusUnauthorized, nil, nil), false},
+		{"http unavailable", oci.NewHTTPError(nil, http.StatusServiceUnavailable, nil, nil), false},
+		{"canceled", context.Canceled, false},
+		{"certificate", &url.Error{Op: "Head", URL: "https://registry.test", Err: x509.UnknownAuthorityError{}}, false},
+		{"other", errors.New("backend failure"), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cache := sparse()
+			desc, _ := pushIndex(t, cache, "latest", "cached")
+			upstream := &tagResolver{Registry: ocimem.New(), resolve: func(context.Context, string, string) (oci.Descriptor, error) {
+				return oci.Descriptor{}, test.err
+			}}
+			r := wrap(t, upstream, cache, &ocimiddleware.CacheOptions{FallbackTagsOnError: true})
+			got, err := r.ResolveTag(t.Context(), "app", "latest")
+			if test.fallback {
+				require.NoError(t, err)
+				require.Equal(t, desc.Digest, got.Digest)
+			} else {
+				require.ErrorIs(t, err, test.err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			_, err = r.ResolveTag(ctx, "app", "latest")
+			require.ErrorIs(t, err, context.Canceled)
+			ctx, cancel = context.WithDeadline(t.Context(), time.Time{})
+			defer cancel()
+			_, err = r.ResolveTag(ctx, "app", "latest")
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		})
+	}
+}
+
+func TestTagFallbackInvalidation(t *testing.T) {
+	for _, action := range []string{"upstream deletion", "push", "delete tag", "delete manifest"} {
+		t.Run(action, func(t *testing.T) {
+			upstream := ocimem.New()
+			cache := &failing{Registry: sparse(), deleteErr: errors.New("cache delete failed")}
+			first, data := pushIndex(t, upstream, "latest", "first")
+			_, err := cache.PushManifest(t.Context(), "app", data, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}})
+			require.NoError(t, err)
+			var upstreamErr error
+			proxy := &tagResolver{Registry: upstream, resolve: func(ctx context.Context, repo, tag string) (oci.Descriptor, error) {
+				if upstreamErr != nil {
+					return oci.Descriptor{}, upstreamErr
+				}
+				return upstream.ResolveTag(ctx, repo, tag)
+			}}
+			// Override only tag resolution; all mutations still reach upstream.
+			r := wrap(t, proxy, cache, &ocimiddleware.CacheOptions{FallbackTagsOnError: true})
+			switch action {
+			case "upstream deletion":
+				require.NoError(t, upstream.DeleteTag(t.Context(), "app", "latest"))
+				_, err = r.ResolveTag(t.Context(), "app", "latest")
+				require.ErrorIs(t, err, oci.ErrManifestUnknown)
+			case "push":
+				pushIndex(t, r, "latest", "second")
+			case "delete tag":
+				require.NoError(t, r.DeleteTag(t.Context(), "app", "latest"))
+			case "delete manifest":
+				require.NoError(t, r.DeleteManifest(t.Context(), "app", first.Digest))
+			}
+			upstreamErr = &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+			_, err = r.ResolveTag(t.Context(), "app", "latest")
+			require.ErrorIs(t, err, upstreamErr, "invalidated values must not return during an outage, even if cache deletion failed")
+		})
+	}
+}
+
+func TestTagFallbackUnavailable(t *testing.T) {
+	connectionErr := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	for _, action := range []string{"missing", "cache error", "canceled during lookup"} {
+		t.Run(action, func(t *testing.T) {
+			cache := sparse()
+			pushIndex(t, cache, "latest", "cached")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			upstream := &tagResolver{resolve: func(context.Context, string, string) (oci.Descriptor, error) {
+				if action == "canceled during lookup" {
+					cancel()
+				}
+				return oci.Descriptor{}, connectionErr
+			}}
+			var cacheRegistry oci.Registry = cache
+			var reports []error
+			cacheErr := errors.New("cache unavailable")
+			switch action {
+			case "missing":
+				require.NoError(t, cache.DeleteTag(t.Context(), "app", "latest"))
+			case "cache error":
+				cacheRegistry = &tagResolver{Registry: cache, resolve: func(context.Context, string, string) (oci.Descriptor, error) {
+					return oci.Descriptor{}, cacheErr
+				}}
+			}
+			r := wrap(t, upstream, cacheRegistry, &ocimiddleware.CacheOptions{FallbackTagsOnError: true, OnError: func(err error) { reports = append(reports, err) }})
+			_, err := r.ResolveTag(ctx, "app", "latest")
+			if action == "canceled during lookup" {
+				require.ErrorIs(t, err, context.Canceled)
+			} else {
+				require.ErrorIs(t, err, connectionErr, "failed fallback must preserve the upstream error")
+			}
+			if action == "cache error" {
+				require.Len(t, reports, 1)
+				require.ErrorIs(t, reports[0], cacheErr)
+			} else {
+				require.Empty(t, reports)
+			}
+		})
+	}
+}
+
+type tagResolver struct {
+	oci.Registry
+	resolve func(context.Context, string, string) (oci.Descriptor, error)
+}
+
+func (r *tagResolver) ResolveTag(ctx context.Context, repo, tag string) (oci.Descriptor, error) {
+	return r.resolve(ctx, repo, tag)
 }
 
 func TestBlobRangesAndInterruptedReads(t *testing.T) {

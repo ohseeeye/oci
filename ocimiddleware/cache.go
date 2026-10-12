@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"net"
+	"net/url"
 	"sync"
 
 	"github.com/ohseeeye/oci"
@@ -17,10 +19,15 @@ type CacheOptions struct {
 	// CacheTags enables cached tag lookups. Default false: every tag is resolved
 	// upstream. Enabling it with a backend without expiration caches tags indefinitely.
 	CacheTags bool
+	// FallbackTagsOnError remembers successful tag lookups and serves the last
+	// cached assignment if upstream fails with a network error. Default false.
+	// With CacheTags false, healthy lookups still always resolve upstream.
+	// Not-found, HTTP errors, and caller cancellation never use this fallback.
+	FallbackTagsOnError bool
 	// TempDir holds temporary blob downloads. Empty uses the system temporary directory.
 	TempDir string
-	// OnError receives cache population and invalidation errors. Such errors do not
-	// fail successful upstream operations. It may be called concurrently.
+	// OnError receives cache population and invalidation errors, and upstream
+	// network errors recovered by tag fallback. It may be called concurrently.
 	OnError func(error)
 }
 
@@ -63,6 +70,24 @@ func Cache(upstream, cache oci.Registry, opts *CacheOptions) (oci.Registry, erro
 
 func cacheMissing(err error) bool {
 	return errors.Is(err, oci.ErrNameUnknown) || errors.Is(err, oci.ErrManifestUnknown) || errors.Is(err, oci.ErrBlobUnknown)
+}
+
+func cacheNetworkError(err error) bool {
+	// A response from upstream, including an authentication or not-found error,
+	// is authoritative. Do not treat it as a connection failure.
+	var httpErr oci.HTTPError
+	var registryErr oci.Error
+	if errors.As(err, &httpErr) || errors.As(err, &registryErr) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	// url.Error implements net.Error even for non-network failures such as
+	// certificate verification. Classify its underlying error instead.
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return cacheNetworkError(urlErr.Err)
+	}
+	var networkErr net.Error
+	return errors.As(err, &networkErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 func (r *cacheRegistry) state(repo string) *cacheRepoState {
@@ -143,11 +168,12 @@ func (r *cacheRegistry) ResolveManifest(ctx context.Context, repo string, digest
 }
 
 // ResolveTag resolves upstream unless CacheTags permits a cached assignment.
+// FallbackTagsOnError permits a saved assignment only on upstream network errors.
 func (r *cacheRegistry) ResolveTag(ctx context.Context, repo, tag string) (oci.Descriptor, error) {
 	if err := ctx.Err(); err != nil {
 		return oci.Descriptor{}, err
 	}
-	if !r.opts.CacheTags {
+	if !r.opts.CacheTags && !r.opts.FallbackTagsOnError {
 		return r.Registry.ResolveTag(ctx, repo, tag)
 	}
 	release, err := r.acquire(ctx, cacheKey{repo, "tag", tag})
@@ -155,12 +181,12 @@ func (r *cacheRegistry) ResolveTag(ctx context.Context, repo, tag string) (oci.D
 		return oci.Descriptor{}, err
 	}
 	defer release()
-	if r.usable(cacheKey{repo, "tag", tag}) {
-		desc, err := r.cache.ResolveTag(ctx, repo, tag)
+	if r.opts.CacheTags {
+		desc, err := r.cachedTag(ctx, repo, tag)
 		if err != nil && !cacheMissing(err) {
 			return oci.Descriptor{}, err
 		}
-		if err == nil && r.usable(cacheKey{repo, "manifest", desc.Digest.String()}) {
+		if err == nil {
 			return desc, nil
 		}
 	}
@@ -170,6 +196,26 @@ func (r *cacheRegistry) ResolveTag(ctx context.Context, repo, tag string) (oci.D
 	s.mu.Unlock()
 	desc, err := r.Registry.ResolveTag(ctx, repo, tag)
 	if err != nil {
+		if ctx.Err() != nil {
+			return oci.Descriptor{}, ctx.Err()
+		}
+		if r.opts.FallbackTagsOnError && cacheMissing(err) {
+			// Once upstream confirms a deletion, an outage must not resurrect it.
+			r.invalidate(cacheKey{repo, "tag", tag}, func() error { return r.cache.DeleteTag(ctx, repo, tag) })
+		}
+		if r.opts.FallbackTagsOnError && cacheNetworkError(err) {
+			cached, cacheErr := r.cachedTag(ctx, repo, tag)
+			if ctx.Err() != nil {
+				return oci.Descriptor{}, ctx.Err()
+			}
+			if cacheErr == nil {
+				r.report(fmt.Errorf("using cached tag %s:%s after upstream failure: %w", repo, tag, err))
+				return cached, nil
+			}
+			if !cacheMissing(cacheErr) {
+				r.report(cacheErr)
+			}
+		}
 		return oci.Descriptor{}, err
 	}
 	// Registry has no tag-only write. Populate its manifest to assign this tag.
@@ -178,6 +224,23 @@ func (r *cacheRegistry) ResolveTag(ctx context.Context, repo, tag string) (oci.D
 		r.report(err)
 	} else {
 		_ = reader.Close()
+	}
+	return desc, nil
+}
+
+func (r *cacheRegistry) cachedTag(ctx context.Context, repo, tag string) (oci.Descriptor, error) {
+	s := r.state(repo)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.invalid[cacheKey{repo, "tag", tag}] {
+		return oci.Descriptor{}, oci.ErrManifestUnknown
+	}
+	desc, err := r.cache.ResolveTag(ctx, repo, tag)
+	if err != nil {
+		return oci.Descriptor{}, err
+	}
+	if s.invalid[cacheKey{repo, "manifest", desc.Digest.String()}] {
+		return oci.Descriptor{}, oci.ErrManifestUnknown
 	}
 	return desc, nil
 }

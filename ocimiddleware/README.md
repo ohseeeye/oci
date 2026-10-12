@@ -12,6 +12,7 @@ as a read-through cache. It is part of the core module and adds no runtime depen
 cache := ocimem.NewWithConfig(&ocimem.Config{AllowSparseManifests: true})
 registry, err := ocimiddleware.Cache(upstream, cache, &ocimiddleware.CacheOptions{
     CacheTags: false, // default: resolve every tag upstream
+    FallbackTagsOnError: true, // optional: use the last saved tag on network failure
 })
 if err != nil {
     return err
@@ -33,6 +34,15 @@ a remote server. The caller owns and closes both backends.
   cache backend**: enabling this option with a backend without expiration keeps
   tags until they are changed or invalidated through this wrapper, or evicted
   directly from the cache. There is no built-in TTL.
+- `FallbackTagsOnError` remembers successful tag lookups while still resolving
+  upstream first when `CacheTags` is false. Connection failures, DNS failures,
+  transport timeouts, and unexpected connection EOFs can use the saved assignment.
+  HTTP errors (including 404, 401, 403, and 5xx), certificate verification failures,
+  and caller cancellation or deadline expiry do not trigger fallback. An upstream
+  not-found response invalidates the saved tag so a later outage cannot revive it.
+  This option defaults to false and can serve stale tags with no age limit; backend
+  expiration or eviction removes them. It does not provide offline listings or
+  content that has never been cached.
 - A cached tag lookup miss fetches the manifest to assign the tag because
   `oci.Registry` has no tag-only write. Digest-only HEAD misses forward upstream
   without fetching bodies.
@@ -45,9 +55,11 @@ a remote server. The caller owns and closes both backends.
   request can cancel independently. Partial range misses forward upstream without
   populating; a full cached blob serves range requests locally.
 
-Only not-found errors trigger fallback. Other cache read errors propagate.
+Only not-found cache errors trigger an upstream read. Other cache read errors propagate.
 Population and invalidation are best effort: `CacheOptions.OnError` reports failures
-without failing a successful upstream operation. There are no background retries
+without failing a successful upstream operation. It also reports upstream network
+errors recovered by tag fallback. If no usable saved tag exists, the original
+upstream error is returned. There are no background retries
 or automatic capacity limits; eviction is the cache backend's responsibility.
 
 ### Writes and scope
