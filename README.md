@@ -36,7 +36,7 @@ has its own module. External dependencies in the core module support tests.
 | [`ocisqlite`](./ocisqlite/README.md) | Persistent registry with SQLite metadata and shared blob files; a separate Go module. |
 | `ocimem` | Lightweight in-memory `oci.Registry` implementation, useful for testing and caching. |
 | `ocimiddleware` | Registry wrappers for read-only and immutable views, namespace prefixes, access control, repository routing, and operation logging. |
-| `ociserver` | HTTP server that serves the OCI distribution protocol on top of any `oci.Registry`. |
+| [`ociserver`](./ociserver/README.md) | HTTP server that serves the OCI distribution protocol on top of any `oci.Registry`. |
 | `ociunify` | Combines two registries into a single unified `oci.Registry`, with configurable read policy. |
 | `pkg/dockerhub` | Docker Hub hostnames for reference normalization, registry connections, and credential lookup. |
 | `pkg/mux` | General-purpose HTTP routing with path templates and middleware. |
