@@ -160,6 +160,54 @@ detection to work. Direct Go calls do not pass through this HTTP middleware;
 a registry that checks identity in its methods must also support an appropriate
 context for those callers.
 
+### Auth errors from registry methods
+
+A registry method can return an error implementing `ociserver.AuthError` to
+supply an HTTP authentication response after the initial `Authorize` hook has
+allowed the request:
+
+```go
+type AuthError interface {
+    error
+    http.Handler
+}
+```
+
+`ociserver` finds these errors with `errors.As`, including wrapped errors, and
+calls their `ServeHTTP` method with the request and response writer. This takes
+precedence over ordinary OCI error mapping. Recognition of `AuthError` is
+independent of the registry's `Authorizer` capability.
+
+For example, a registry can return this error to initiate a browser login. This
+snippet uses `net/http` and `ociserver`:
+
+```go
+type loginRequired struct {
+    url string
+}
+
+var _ ociserver.AuthError = (*loginRequired)(nil)
+
+func (e *loginRequired) Error() string {
+    return "authentication required"
+}
+
+func (e *loginRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    http.Redirect(w, r, e.url, http.StatusSeeOther)
+}
+```
+
+An auth error can also write a `401` response with a `WWW-Authenticate` challenge,
+or a `403` denial. HTTP tag reads call `ResolveTag` and then `GetManifest`; both
+methods support returning an auth error. Blob operations, uploads (including
+writer operations), mounts, listings, tag history, and blob redirect decisions
+also support these errors. An auth error from a mount stops the request before
+upload fallback.
+
+Return the error before response streaming begins. An error raised while reading
+or closing a download body cannot replace a response already being sent with a
+redirect or challenge. Auth error handlers must support concurrent use.
+
 ## Blob redirects
 
 If the backend passed to `New` also implements `ociserver.Redirecter`, the server
@@ -177,7 +225,8 @@ The server resolves the blob through `Registry.ResolveBlob` first, then calls
 
 - Return `true, url, nil` to send HTTP `307 Temporary Redirect`.
 - Return `false, "", nil` to stream through `Registry.GetBlob` or `GetBlobRange`.
-- Return an error to send HTTP `500`; the server logs it when a logger is configured.
+- Return an `AuthError` to supply an authentication response. Other errors send
+  HTTP `500`; the server logs them when a logger is configured.
 
 For example, an application can adapt its URL-signing function with a registry
 wrapper. This snippet uses `context`, `net/http`, `oci`, and `ociserver`:

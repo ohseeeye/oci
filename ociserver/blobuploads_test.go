@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -342,6 +343,89 @@ func (w *testBlobWriter) Commit(dgst oci.Digest) (oci.Descriptor, error) {
 
 type errorBlobWriter struct {
 	err error
+}
+
+type authBlobWriter struct {
+	oci.BlobWriter
+	fail    string
+	err     error
+	cancels int
+}
+
+func (w *authBlobWriter) Write(data []byte) (int, error) {
+	if w.fail == "write" {
+		return 0, w.err
+	}
+	return w.BlobWriter.Write(data)
+}
+
+func (w *authBlobWriter) Close() error {
+	if w.fail == "close" {
+		return w.err
+	}
+	return w.BlobWriter.Close()
+}
+
+func (w *authBlobWriter) Cancel() error {
+	w.cancels++
+	if w.fail == "cancel" {
+		return w.err
+	}
+	return w.BlobWriter.Cancel()
+}
+
+func (w *authBlobWriter) Commit(digest oci.Digest) (oci.Descriptor, error) {
+	if w.fail == "commit" {
+		return oci.Descriptor{}, w.err
+	}
+	return w.BlobWriter.Commit(digest)
+}
+
+func TestBlobUploadWriterAuthErrors(t *testing.T) {
+	digest := ocidigest.FromBytes([]byte("blob"))
+	for _, test := range []struct{ method, target, fail string }{
+		{http.MethodPost, "/v2/example/blobs/uploads/?digest=" + digest.String(), "write"},
+		{http.MethodPost, "/v2/example/blobs/uploads/?digest=" + digest.String(), "close"},
+		{http.MethodPost, "/v2/example/blobs/uploads/?digest=" + digest.String(), "commit"},
+		{http.MethodPatch, "/v2/example/blobs/uploads/session", "write"},
+		{http.MethodPatch, "/v2/example/blobs/uploads/session", "close"},
+		{http.MethodPut, "/v2/example/blobs/uploads/session?digest=" + digest.String(), "write"},
+		{http.MethodPut, "/v2/example/blobs/uploads/session?digest=" + digest.String(), "close"},
+		{http.MethodPut, "/v2/example/blobs/uploads/session?digest=" + digest.String(), "commit"},
+		{http.MethodDelete, "/v2/example/blobs/uploads/session", "cancel"},
+	} {
+		t.Run(test.method+"/"+test.fail, func(t *testing.T) {
+			var responses int
+			authErr := &testAuthError{cause: oci.ErrDenied, respond: func(w http.ResponseWriter, r *http.Request) {
+				responses++
+				http.Redirect(w, r, "/login", http.StatusSeeOther)
+			}}
+			writer := &authBlobWriter{
+				BlobWriter: &testBlobWriter{id: "session"},
+				fail:       test.fail,
+				err:        fmt.Errorf("upload authorization: %w", authErr),
+			}
+			backend := &oci.Funcs{
+				PushBlobChunked_: func(context.Context, string, int) (oci.BlobWriter, error) { return writer, nil },
+				PushBlobChunkedResume_: func(context.Context, string, string, int64, int) (oci.BlobWriter, error) {
+					return writer, nil
+				},
+			}
+			srv, err := New(backend, nil)
+			require.NoError(t, err)
+			req := httptest.NewRequest(test.method, test.target, strings.NewReader("blob"))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+			require.Equal(t, "/login", rec.Header().Get("Location"))
+			require.Equal(t, 1, responses)
+			if test.fail == "cancel" {
+				require.Equal(t, 1, writer.cancels)
+			} else {
+				require.Zero(t, writer.cancels, "auth failures must not cancel resumable sessions")
+			}
+		})
+	}
 }
 
 func (w *errorBlobWriter) Write([]byte) (int, error) {

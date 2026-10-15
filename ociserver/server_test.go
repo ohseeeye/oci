@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/ohseeeye/oci"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
@@ -258,6 +261,196 @@ func TestServerAuthorizerReceivesRepositoryAndReference(t *testing.T) {
 			require.Equal(t, 1, calls)
 		})
 	}
+}
+
+type testAuthError struct {
+	cause   error
+	respond http.HandlerFunc
+}
+
+var _ AuthError = (*testAuthError)(nil)
+
+func (e *testAuthError) Error() string { return e.cause.Error() }
+func (e *testAuthError) Unwrap() error { return e.cause }
+func (e *testAuthError) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e.respond(w, r)
+}
+
+func TestServerMethodAuthResponses(t *testing.T) {
+	for _, response := range []string{"redirect", "challenge", "denied"} {
+		for _, wrapping := range []string{"direct", "wrapped", "joined"} {
+			t.Run(response+"/"+wrapping, func(t *testing.T) {
+				var responses int
+				authErr := &testAuthError{cause: oci.ErrManifestUnknown, respond: func(w http.ResponseWriter, r *http.Request) {
+					responses++
+					require.Equal(t, "/v2/example/manifests/latest", r.URL.Path)
+					switch response {
+					case "redirect":
+						http.Redirect(w, r, "/login", http.StatusSeeOther)
+					case "challenge":
+						w.Header().Set("WWW-Authenticate", `Bearer realm="https://auth.example.test/token"`)
+						returnError(w, ErrUnauthorized())
+					case "denied":
+						returnError(w, ErrDenied("repository is private"))
+					}
+				}}
+				var backendErr error = authErr
+				switch wrapping {
+				case "wrapped":
+					backendErr = fmt.Errorf("secured registry: %w", authErr)
+				case "joined":
+					backendErr = errors.Join(errors.New("additional detail"), authErr)
+				}
+				backend := &oci.Funcs{NewError: func(context.Context, string, string) error { return backendErr }}
+				srv, err := New(backend, nil)
+				require.NoError(t, err)
+				rec := httptest.NewRecorder()
+				srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v2/example/manifests/latest", nil))
+				require.Equal(t, 1, responses)
+				switch response {
+				case "redirect":
+					require.Equal(t, http.StatusSeeOther, rec.Code)
+					require.Equal(t, "/login", rec.Header().Get("Location"))
+				case "challenge":
+					require.Equal(t, http.StatusUnauthorized, rec.Code)
+					require.Contains(t, rec.Header().Get("WWW-Authenticate"), "Bearer")
+					require.Contains(t, rec.Body.String(), `"code":"UNAUTHORIZED"`)
+				case "denied":
+					require.Equal(t, http.StatusForbidden, rec.Code)
+					require.Contains(t, rec.Body.String(), `"code":"DENIED"`)
+				}
+			})
+		}
+	}
+}
+
+func TestServerRegistryMethodsCanReturnAuthErrors(t *testing.T) {
+	digest := ocidigest.FromBytes([]byte("blob"))
+	const index = `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}`
+	for _, test := range []struct {
+		method, target, operation, body, byteRange string
+	}{
+		{http.MethodGet, "/v2/example/manifests/latest", "ResolveTag", "", ""},
+		{http.MethodHead, "/v2/example/manifests/latest", "ResolveTag", "", ""},
+		{http.MethodGet, "/v2/example/manifests/" + digest.String(), "ResolveManifest", "", ""},
+		{http.MethodHead, "/v2/example/manifests/" + digest.String(), "ResolveManifest", "", ""},
+		{http.MethodGet, "/v2/example/manifests/latest", "GetManifest", "", ""},
+		{http.MethodGet, "/v2/example/manifests/" + digest.String(), "GetManifest", "", ""},
+		{http.MethodPut, "/v2/example/manifests/latest", "PushManifest", index, ""},
+		{http.MethodDelete, "/v2/example/manifests/latest", "DeleteTag", "", ""},
+		{http.MethodDelete, "/v2/example/manifests/" + digest.String(), "DeleteManifest", "", ""},
+		{http.MethodHead, "/v2/example/blobs/" + digest.String(), "ResolveBlob", "", ""},
+		{http.MethodGet, "/v2/example/blobs/" + digest.String(), "ResolveBlob", "", ""},
+		{http.MethodGet, "/v2/example/blobs/" + digest.String(), "GetBlob", "", ""},
+		{http.MethodGet, "/v2/example/blobs/" + digest.String(), "GetBlobRange", "", "bytes=0-1"},
+		{http.MethodDelete, "/v2/example/blobs/" + digest.String(), "DeleteBlob", "", ""},
+		{http.MethodGet, "/v2/example/tags/list", "Tags", "", ""},
+		{http.MethodGet, "/v2/example/referrers/" + digest.String(), "Referrers", "", ""},
+		{http.MethodPost, "/v2/example/blobs/uploads/", "PushBlobChunked", "", ""},
+		{http.MethodPost, "/v2/example/blobs/uploads/?digest=" + digest.String(), "PushBlobChunked", "blob", ""},
+		{http.MethodGet, "/v2/example/blobs/uploads/session", "PushBlobChunkedResume", "", ""},
+		{http.MethodDelete, "/v2/example/blobs/uploads/session", "PushBlobChunkedResume", "", ""},
+		{http.MethodPatch, "/v2/example/blobs/uploads/session", "PushBlobChunkedResume", "blob", ""},
+		{http.MethodPut, "/v2/example/blobs/uploads/session?digest=" + digest.String(), "PushBlobChunkedResume", "blob", ""},
+		{http.MethodPost, "/v2/example/blobs/uploads/?mount=" + digest.String() + "&from=source", "MountBlob", "", ""},
+	} {
+		t.Run(test.method+" "+test.operation+" "+test.target, func(t *testing.T) {
+			var calls, responses int
+			authErr := &testAuthError{cause: oci.ErrNameUnknown, respond: func(w http.ResponseWriter, r *http.Request) {
+				responses++
+				http.Redirect(w, r, "/login", http.StatusSeeOther)
+			}}
+			backend := &oci.Funcs{NewError: func(_ context.Context, operation, repo string) error {
+				calls++
+				require.Equal(t, test.operation, operation)
+				require.Equal(t, "example", repo)
+				return fmt.Errorf("operation failed: %w", authErr)
+			}}
+			if test.operation == "PushBlobChunkedResume" {
+				backend.PushBlobChunkedResume_ = func(ctx context.Context, repo, _ string, _ int64, _ int) (oci.BlobWriter, error) {
+					return nil, backend.NewError(ctx, "PushBlobChunkedResume", repo)
+				}
+			}
+			resolve := func(context.Context, string, oci.Digest) (oci.Descriptor, error) {
+				return oci.Descriptor{Digest: digest, Size: 4, MediaType: oci.MediaTypeImageIndex}, nil
+			}
+			if test.operation == "GetBlob" || test.operation == "GetBlobRange" {
+				backend.ResolveBlob_ = resolve
+			}
+			if test.operation == "GetManifest" {
+				backend.ResolveManifest_ = resolve
+				backend.ResolveTag_ = func(ctx context.Context, repo, _ string) (oci.Descriptor, error) {
+					return resolve(ctx, repo, digest)
+				}
+			}
+			srv, err := New(backend, nil)
+			require.NoError(t, err)
+			req := httptest.NewRequest(test.method, test.target, strings.NewReader(test.body))
+			if test.byteRange != "" {
+				req.Header.Set("Range", test.byteRange)
+			}
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+			require.Equal(t, "/login", rec.Header().Get("Location"))
+			require.Equal(t, 1, calls, "auth failures must not cause fallback operations")
+			require.Equal(t, 1, responses)
+			require.Empty(t, rec.Header().Get("Docker-Content-Digest"))
+			require.Empty(t, rec.Header().Get("ETag"))
+			require.Empty(t, rec.Header().Get("Content-Range"))
+		})
+	}
+}
+
+type authRedirectRegistry struct {
+	oci.Registry
+	err error
+}
+
+func (r *authRedirectRegistry) Redirect(*http.Request, oci.Descriptor, string) (bool, string, error) {
+	return false, "", r.err
+}
+
+func TestServerBlobRedirectAuthError(t *testing.T) {
+	digest := ocidigest.FromBytes([]byte("blob"))
+	backend := &authRedirectRegistry{
+		Registry: &oci.Funcs{ResolveBlob_: func(context.Context, string, oci.Digest) (oci.Descriptor, error) {
+			return oci.Descriptor{Digest: digest, Size: 4}, nil
+		}},
+		err: &testAuthError{cause: oci.ErrDenied, respond: func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+		}},
+	}
+	srv, err := New(backend, nil)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v2/example/blobs/"+digest.String(), nil))
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	require.Equal(t, "/login", rec.Header().Get("Location"))
+}
+
+func TestServerStreamingAuthErrorDoesNotRedirect(t *testing.T) {
+	var responses int
+	authErr := &testAuthError{cause: oci.ErrDenied, respond: func(w http.ResponseWriter, r *http.Request) {
+		responses++
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	}}
+	digest := ocidigest.FromBytes([]byte("blobblob"))
+	desc := oci.Descriptor{Digest: digest, Size: 8}
+	backend := &oci.Funcs{
+		ResolveBlob_: func(context.Context, string, oci.Digest) (oci.Descriptor, error) { return desc, nil },
+		GetBlob_: func(context.Context, string, oci.Digest) (oci.BlobReader, error) {
+			return &testBlobReader{desc: desc, ReadCloser: io.NopCloser(io.MultiReader(strings.NewReader("blob"), iotest.ErrReader(authErr)))}, nil
+		},
+	}
+	srv, err := New(backend, nil)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v2/example/blobs/"+digest.String(), nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "blob", rec.Body.String())
+	require.Zero(t, responses)
+	require.Empty(t, rec.Header().Get("Location"))
 }
 
 func TestServerInvalidRepositoryNameReturnsOCIError(t *testing.T) {

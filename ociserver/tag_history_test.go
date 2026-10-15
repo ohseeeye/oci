@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -90,6 +91,24 @@ func TestTagHistoryAuthorizer(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, 1, calls)
+}
+
+func TestTagHistoryAuthError(t *testing.T) {
+	var responses int
+	authErr := &testAuthError{cause: oci.ErrNameUnknown, respond: func(w http.ResponseWriter, r *http.Request) {
+		responses++
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	}}
+	backend := &tagHistoryBackend{list: func(context.Context, string, string, *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+		return oci.ErrorSeq[oci.Descriptor](fmt.Errorf("tag history: %w", authErr))
+	}}
+	srv, err := New(backend, nil)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v2/example/_oci/tag-history/latest", nil))
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	require.Equal(t, "/login", rec.Header().Get("Location"))
+	require.Equal(t, 1, responses)
 }
 
 func TestTagHistoryResponseAndPagination(t *testing.T) {

@@ -144,10 +144,10 @@ func (f *Funcs) PushBlobChunked(ctx context.Context, repo string, chunkSize int)
 
 // PushBlobChunkedResume implements [Registry.PushBlobChunkedResume] by calling f.PushBlobChunkedResume_.
 func (f *Funcs) PushBlobChunkedResume(ctx context.Context, repo, id string, offset int64, chunkSize int) (BlobWriter, error) {
-	if f != nil && f.PushBlobChunked_ != nil {
+	if f != nil && f.PushBlobChunkedResume_ != nil {
 		return f.PushBlobChunkedResume_(ctx, repo, id, offset, chunkSize)
 	}
-	return nil, f.newError(ctx, "PushBlobChunked", repo)
+	return nil, f.newError(ctx, "PushBlobChunkedResume", repo)
 }
 
 // MountBlob implements [Registry.MountBlob] by calling f.MountBlob_.
