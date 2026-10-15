@@ -38,6 +38,9 @@ func (s *Server) referrersGet() http.HandlerFunc {
 		descSeq := s.db.Referrers(r.Context(), name, dgst, &oci.ReferrersParameters{ArtifactType: artifactType})
 		descs, err := oci.All(descSeq)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrManifestUnknown) || errors.Is(err, oci.ErrNameUnknown) {
 				body, encErr := marshalIndexResponse([]oci.Descriptor{})
 				if encErr != nil {

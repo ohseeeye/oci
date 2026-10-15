@@ -41,6 +41,9 @@ func (s *Server) tagsGet() http.HandlerFunc {
 		tagSeq := s.db.Tags(r.Context(), name, &oci.TagsParameters{StartAfter: last, Limit: fetchLimit})
 		tags, err := oci.All[string](tagSeq)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrNameUnknown) {
 				returnError(w, ErrNameUnknown(name))
 				return

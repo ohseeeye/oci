@@ -72,11 +72,10 @@ with a 4 MiB request-body limit. There is no built-in repository catalog endpoin
 |-------|----------|
 | `Logger` | A `*slog.Logger` for unexpected internal failures. Nil disables these diagnostics. |
 | `Middlewares` | HTTP middleware applied to all routes, including custom routes. The first entry is outermost. |
-| `AuthMiddleware` | HTTP middleware applied only to the built-in OCI routes under `/v2`. |
 
-Authentication is supplied by the application through `AuthMiddleware`; the
-server does not configure credentials or a token service itself. Use
-`Middlewares` for request logging, tracing, or other application-wide behavior.
+Registry-owned authentication is supplied through the optional `Authorizer`
+interface described below. Use `Middlewares` for request logging, tracing, or
+application-wide authentication that should also cover custom routes.
 
 Add application routes outside `/v2` through `Server.Mux()`:
 
@@ -86,10 +85,128 @@ handler.Mux().Get("/health", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-This route receives `Middlewares`, but not `AuthMiddleware`. Configure root
+This route receives `Middlewares`, but not the registry's `Authorizer`. Configure root
 middleware in `ServerConfig` before construction; the router does not allow
 middleware to be added after routes have been registered. `New` copies the
 configuration and its middleware slice.
+
+## Authentication and authorization
+
+If the backend passed to `New` also implements `ociserver.Authorizer`, the server
+automatically calls its HTTP authorization hook for matched built-in OCI requests:
+
+```go
+type Authorizer interface {
+    Authorize(w http.ResponseWriter, r *http.Request, repo, reference string, next http.Handler)
+}
+```
+
+`Authorize` can parse and validate credentials, attach an identity to the request
+context, and call `next.ServeHTTP(w, r.WithContext(ctx))` to continue. Registry
+methods receive that context and can enforce permissions using the same
+registry's policy. The registry implementation chooses the identity type and
+authentication mechanism; `ociserver` does not configure credentials or a token
+service.
+
+The hook owns authentication failure responses, including
+`WWW-Authenticate` challenges, denials, and browser login redirects. It has access
+to the original HTTP request and response writer.
+
+Repository names and references are extracted by the router before `Authorize`
+runs. The values have these meanings:
+
+| Request | `repo` | `reference` |
+|---------|--------|-------------|
+| `/v2/` discovery | Empty | Empty |
+| Manifest operations | Repository name | Tag or digest from the path |
+| Blob operations and referrers | Repository name | Digest from the path |
+| Tag history | Repository name | Tag from the path |
+| Tag listing and upload sessions | Repository name | Empty |
+
+These are the routed path values, before the OCI handlers validate them. Tags
+are not resolved to digests before authorization. Upload session IDs and query
+parameters are not content references; mount source repositories and upload
+digests remain available through `r.URL.Query()`.
+
+For example, an application can package its auth hook with the registry. This
+snippet uses `net/http`, `oci`, and `ociserver`:
+
+```go
+type securedRegistry struct {
+    oci.Registry
+    authorize func(http.ResponseWriter, *http.Request, string, string, http.Handler)
+}
+
+var _ ociserver.Authorizer = (*securedRegistry)(nil)
+
+func (r *securedRegistry) Authorize(w http.ResponseWriter, req *http.Request, repo, reference string, next http.Handler) {
+    r.authorize(w, req, repo, reference, next)
+}
+```
+
+Pass `&securedRegistry{Registry: backend, authorize: authorizeRequest}` to `New`,
+where `authorizeRequest` is the application's auth hook. No auth field in
+`ServerConfig` is needed. This replaces the former `AuthMiddleware` field.
+
+The hook runs before the OCI handlers, including `/v2/` discovery, uploads,
+and optional tag-history routes. `ServerConfig.Middlewares` run outside it.
+Custom routes, including login and callback endpoints registered through `Mux`,
+do not receive it; protect those separately when needed. A registry without
+`Authorizer` supplies no HTTP authentication through this mechanism.
+
+`Authorize` runs once per matched request and must support concurrent requests.
+Outer registry wrappers must explicitly preserve `Authorizer` for automatic
+detection to work. Direct Go calls do not pass through this HTTP middleware;
+a registry that checks identity in its methods must also support an appropriate
+context for those callers.
+
+### Auth errors from registry methods
+
+A registry method can return an error implementing `ociserver.AuthError` to
+supply an HTTP authentication response after the initial `Authorize` hook has
+allowed the request:
+
+```go
+type AuthError interface {
+    error
+    http.Handler
+}
+```
+
+`ociserver` finds these errors with `errors.As`, including wrapped errors, and
+calls their `ServeHTTP` method with the request and response writer. This takes
+precedence over ordinary OCI error mapping. Recognition of `AuthError` is
+independent of the registry's `Authorizer` capability.
+
+For example, a registry can return this error to initiate a browser login. This
+snippet uses `net/http` and `ociserver`:
+
+```go
+type loginRequired struct {
+    url string
+}
+
+var _ ociserver.AuthError = (*loginRequired)(nil)
+
+func (e *loginRequired) Error() string {
+    return "authentication required"
+}
+
+func (e *loginRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    http.Redirect(w, r, e.url, http.StatusSeeOther)
+}
+```
+
+An auth error can also write a `401` response with a `WWW-Authenticate` challenge,
+or a `403` denial. HTTP tag reads call `ResolveTag` and then `GetManifest`; both
+methods support returning an auth error. Blob operations, uploads (including
+writer operations), mounts, listings, tag history, and blob redirect decisions
+also support these errors. An auth error from a mount stops the request before
+upload fallback.
+
+Return the error before response streaming begins. An error raised while reading
+or closing a download body cannot replace a response already being sent with a
+redirect or challenge. Auth error handlers must support concurrent use.
 
 ## Blob redirects
 
@@ -108,7 +225,8 @@ The server resolves the blob through `Registry.ResolveBlob` first, then calls
 
 - Return `true, url, nil` to send HTTP `307 Temporary Redirect`.
 - Return `false, "", nil` to stream through `Registry.GetBlob` or `GetBlobRange`.
-- Return an error to send HTTP `500`; the server logs it when a logger is configured.
+- Return an `AuthError` to supply an authentication response. Other errors send
+  HTTP `500`; the server logs them when a logger is configured.
 
 For example, an application can adapt its URL-signing function with a registry
 wrapper. This snippet uses `context`, `net/http`, `oci`, and `ociserver`:
