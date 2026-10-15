@@ -281,9 +281,10 @@ func TestServerMethodAuthResponses(t *testing.T) {
 		for _, wrapping := range []string{"direct", "wrapped", "joined"} {
 			t.Run(response+"/"+wrapping, func(t *testing.T) {
 				var responses int
+				var responsePath string
 				authErr := &testAuthError{cause: oci.ErrManifestUnknown, respond: func(w http.ResponseWriter, r *http.Request) {
 					responses++
-					require.Equal(t, "/v2/example/manifests/latest", r.URL.Path)
+					responsePath = r.URL.Path
 					switch response {
 					case "redirect":
 						http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -307,6 +308,7 @@ func TestServerMethodAuthResponses(t *testing.T) {
 				rec := httptest.NewRecorder()
 				srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v2/example/manifests/latest", nil))
 				require.Equal(t, 1, responses)
+				require.Equal(t, "/v2/example/manifests/latest", responsePath)
 				switch response {
 				case "redirect":
 					require.Equal(t, http.StatusSeeOther, rec.Code)
