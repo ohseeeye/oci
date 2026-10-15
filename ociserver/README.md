@@ -72,11 +72,10 @@ with a 4 MiB request-body limit. There is no built-in repository catalog endpoin
 |-------|----------|
 | `Logger` | A `*slog.Logger` for unexpected internal failures. Nil disables these diagnostics. |
 | `Middlewares` | HTTP middleware applied to all routes, including custom routes. The first entry is outermost. |
-| `AuthMiddleware` | HTTP middleware applied only to the built-in OCI routes under `/v2`. |
 
-Authentication is supplied by the application through `AuthMiddleware`; the
-server does not configure credentials or a token service itself. Use
-`Middlewares` for request logging, tracing, or other application-wide behavior.
+Registry-owned authentication is supplied through the optional `Authorizer`
+interface described below. Use `Middlewares` for request logging, tracing, or
+application-wide authentication that should also cover custom routes.
 
 Add application routes outside `/v2` through `Server.Mux()`:
 
@@ -86,10 +85,63 @@ handler.Mux().Get("/health", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-This route receives `Middlewares`, but not `AuthMiddleware`. Configure root
+This route receives `Middlewares`, but not the registry's `Authorizer`. Configure root
 middleware in `ServerConfig` before construction; the router does not allow
 middleware to be added after routes have been registered. `New` copies the
 configuration and its middleware slice.
+
+## Authentication and authorization
+
+If the backend passed to `New` also implements `ociserver.Authorizer`, the server
+automatically applies its HTTP middleware to the built-in OCI routes:
+
+```go
+type Authorizer interface {
+    Authorize(next http.Handler) http.Handler
+}
+```
+
+The returned handler can parse and validate credentials, attach an identity to
+the request context, and decide whether to call `next`. Registry methods receive
+that context and can enforce permissions using the same registry's policy. The
+registry implementation chooses the identity type and authentication mechanism;
+`ociserver` does not configure credentials or a token service.
+
+The middleware owns authentication failure responses, including
+`WWW-Authenticate` challenges, denials, and browser login redirects. It has access
+to the original HTTP request and response writer.
+
+For example, an application can package its existing HTTP auth middleware with
+the registry. This snippet uses `net/http`, `oci`, and `ociserver`:
+
+```go
+type securedRegistry struct {
+    oci.Registry
+    middleware func(http.Handler) http.Handler
+}
+
+var _ ociserver.Authorizer = (*securedRegistry)(nil)
+
+func (r *securedRegistry) Authorize(next http.Handler) http.Handler {
+    return r.middleware(next)
+}
+```
+
+Pass `&securedRegistry{Registry: backend, middleware: authenticate}` to `New`,
+where `authenticate` is the application's HTTP auth middleware. No auth field
+in `ServerConfig` is needed. This replaces the former `AuthMiddleware` field.
+
+The middleware runs before the OCI handlers, including `/v2/` discovery, uploads,
+and optional tag-history routes. `ServerConfig.Middlewares` run outside it.
+Custom routes, including login and callback endpoints registered through `Mux`,
+do not receive it; protect those separately when needed. A registry without
+`Authorizer` supplies no HTTP authentication through this mechanism.
+
+`Authorize` is called during construction and may be called for multiple routes;
+the returned handlers must support concurrent requests. Outer registry wrappers
+must explicitly preserve `Authorizer` for automatic detection to work. Direct Go
+calls do not pass through this HTTP middleware; a registry that checks identity
+in its methods must also support an appropriate context for those callers.
 
 ## Blob redirects
 

@@ -100,7 +100,18 @@ func TestServerMiddlewares(t *testing.T) {
 	require.True(t, strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json"))
 }
 
-func TestServerAuthMiddlewareOnlyAppliesToOCIRoutes(t *testing.T) {
+type authorizingRegistry struct {
+	oci.Registry
+	authorize func(http.Handler) http.Handler
+}
+
+var _ Authorizer = (*authorizingRegistry)(nil)
+
+func (r *authorizingRegistry) Authorize(next http.Handler) http.Handler {
+	return r.authorize(next)
+}
+
+func TestServerAuthorizerOnlyAppliesToOCIRoutes(t *testing.T) {
 	var calls []string
 	middleware := func(name string) func(http.Handler) http.Handler {
 		return func(next http.Handler) http.Handler {
@@ -110,9 +121,12 @@ func TestServerAuthMiddlewareOnlyAppliesToOCIRoutes(t *testing.T) {
 			})
 		}
 	}
-	srv, err := New((*oci.Funcs)(nil), &ServerConfig{
-		Middlewares:    []func(http.Handler) http.Handler{middleware("root")},
-		AuthMiddleware: middleware("auth"),
+	backend := &authorizingRegistry{
+		Registry:  (*oci.Funcs)(nil),
+		authorize: middleware("auth"),
+	}
+	srv, err := New(backend, &ServerConfig{
+		Middlewares: []func(http.Handler) http.Handler{middleware("root")},
 	})
 	require.NoError(t, err)
 	srv.Mux().Get(`/health`, func(w http.ResponseWriter, _ *http.Request) {
@@ -129,6 +143,76 @@ func TestServerAuthMiddlewareOnlyAppliesToOCIRoutes(t *testing.T) {
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Equal(t, []string{"root"}, calls)
+}
+
+func TestServerAuthorizerPassesContextToRegistry(t *testing.T) {
+	type identityKey struct{}
+	const challenge = `Bearer realm="https://auth.example.test/token"`
+	digest := ocidigest.FromBytes([]byte("blob"))
+	var lookups int
+	backend := &authorizingRegistry{
+		Registry: &oci.Funcs{ResolveBlob_: func(ctx context.Context, repo string, got oci.Digest) (oci.Descriptor, error) {
+			lookups++
+			require.Equal(t, "alice", ctx.Value(identityKey{}))
+			require.Equal(t, "example/app", repo)
+			require.Equal(t, digest, got)
+			return oci.Descriptor{Digest: digest, Size: 4}, nil
+		}},
+		authorize: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer valid" {
+					w.Header().Set("WWW-Authenticate", challenge)
+					returnError(w, ErrUnauthorized())
+					return
+				}
+				ctx := context.WithValue(r.Context(), identityKey{}, "alice")
+				next.ServeHTTP(w, r.WithContext(ctx))
+			})
+		},
+	}
+	srv, err := New(backend, nil)
+	require.NoError(t, err)
+	target := "/v2/example/app/blobs/" + digest.String()
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodHead, target, nil))
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Equal(t, challenge, rec.Header().Get("WWW-Authenticate"))
+	require.Zero(t, lookups, "authentication must happen before registry calls")
+
+	req := httptest.NewRequest(http.MethodHead, target, nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, lookups)
+	require.Equal(t, digest.String(), rec.Header().Get("Docker-Content-Digest"))
+}
+
+func TestServerAuthorizerCanRedirect(t *testing.T) {
+	backend := &authorizingRegistry{
+		Registry: (*oci.Funcs)(nil),
+		authorize: func(http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/login", http.StatusFound)
+			})
+		},
+	}
+	srv, err := New(backend, nil)
+	require.NoError(t, err)
+	for _, request := range []struct{ method, target string }{
+		{http.MethodGet, "/v2/"},
+		{http.MethodGet, "/v2/example/manifests/latest"},
+		{http.MethodPost, "/v2/example/blobs/uploads/"},
+		{http.MethodPatch, "/v2/example/blobs/uploads/session"},
+		{http.MethodPut, "/v2/example/blobs/uploads/session"},
+		{http.MethodDelete, "/v2/example/blobs/uploads/session"},
+	} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(request.method, request.target, nil))
+		require.Equal(t, http.StatusFound, rec.Code)
+		require.Equal(t, "/login", rec.Header().Get("Location"))
+	}
 }
 
 func TestServerInvalidRepositoryNameReturnsOCIError(t *testing.T) {

@@ -53,6 +53,43 @@ func TestTagHistoryRouteRequiresCapability(t *testing.T) {
 	require.Empty(t, rec.Header().Get("Link"))
 }
 
+type authorizingTagHistoryBackend struct {
+	*tagHistoryBackend
+}
+
+func (b *authorizingTagHistoryBackend) Authorize(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer valid" {
+			returnError(w, ErrUnauthorized())
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func TestTagHistoryAuthorizer(t *testing.T) {
+	var calls int
+	backend := &authorizingTagHistoryBackend{tagHistoryBackend: &tagHistoryBackend{
+		list: func(context.Context, string, string, *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+			calls++
+			return func(func(oci.Descriptor, error) bool) {}
+		},
+	}}
+	srv, err := New(backend, nil)
+	require.NoError(t, err)
+	target := "/v2/example/_oci/tag-history/latest"
+	rec, _ := getTagHistory(t, srv, target)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Zero(t, calls)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, calls)
+}
+
 func TestTagHistoryResponseAndPagination(t *testing.T) {
 	registry := ocimem.New()
 	for _, version := range []string{"one", "two"} {
