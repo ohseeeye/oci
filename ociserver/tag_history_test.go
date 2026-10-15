@@ -55,16 +55,16 @@ func TestTagHistoryRouteRequiresCapability(t *testing.T) {
 
 type authorizingTagHistoryBackend struct {
 	*tagHistoryBackend
+	repo, reference string
 }
 
-func (b *authorizingTagHistoryBackend) Authorize(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer valid" {
-			returnError(w, ErrUnauthorized())
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+func (b *authorizingTagHistoryBackend) Authorize(w http.ResponseWriter, r *http.Request, repo, reference string, next http.Handler) {
+	b.repo, b.reference = repo, reference
+	if r.Header.Get("Authorization") != "Bearer valid" {
+		returnError(w, ErrUnauthorized())
+		return
+	}
+	next.ServeHTTP(w, r)
 }
 
 func TestTagHistoryAuthorizer(t *testing.T) {
@@ -81,6 +81,8 @@ func TestTagHistoryAuthorizer(t *testing.T) {
 	rec, _ := getTagHistory(t, srv, target)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	require.Zero(t, calls)
+	require.Equal(t, "example", backend.repo)
+	require.Equal(t, "latest", backend.reference)
 
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	req.Header.Set("Authorization", "Bearer valid")

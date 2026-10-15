@@ -97,7 +97,18 @@ func (s *Server) addRoutes() {
 
 	r.Route("/v2", func(r mux.Router) {
 		if authorizer, ok := s.db.(Authorizer); ok {
-			r.Use(authorizer.Authorize)
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					reference := mux.URLParam(r, "reference")
+					if reference == "" {
+						reference = mux.URLParam(r, "digest")
+					}
+					if reference == "" {
+						reference = mux.URLParam(r, "tag")
+					}
+					authorizer.Authorize(w, r, mux.URLParam(r, "name"), reference, next)
+				})
+			})
 		}
 		r.Use(validateRepositoryName)
 
@@ -176,15 +187,18 @@ func returnError(w http.ResponseWriter, oe *OCIError) {
 // ServerConfig.Middlewares run outside it; custom routes added through Server.Mux
 // do not receive it.
 type Authorizer interface {
-	// Authorize wraps next with HTTP authentication and authorization. The
-	// returned handler may attach an identity to the request context before
-	// calling next, so registry methods can enforce permissions. It is responsible
-	// for writing authentication challenges, denials, or login redirects when
-	// it does not call next.
+	// Authorize handles authentication and authorization for a matched request.
+	// repo is the repository name extracted from the path, or empty for /v2/.
+	// reference is the manifest tag/digest, blob/referrer digest, or history tag
+	// extracted from the path. Listings and upload sessions have no reference;
+	// upload IDs and query parameters are not treated as references.
 	//
-	// Authorize is called during server construction and may be called for
-	// multiple routes. The returned handlers must support concurrent requests.
-	Authorize(next http.Handler) http.Handler
+	// These are routed path values, not resolved descriptors. Name, reference,
+	// and content validation happen afterward in the OCI handlers. Authorize may
+	// attach an identity using r.WithContext and call next.ServeHTTP to continue.
+	// Otherwise it must write the challenge, denial, or login redirect itself.
+	// It runs once per matched request and must support concurrent requests.
+	Authorize(w http.ResponseWriter, r *http.Request, repo, reference string, next http.Handler)
 }
 
 // Redirecter provides storage-backed URL generation for blob redirects.

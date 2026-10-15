@@ -102,13 +102,13 @@ func TestServerMiddlewares(t *testing.T) {
 
 type authorizingRegistry struct {
 	oci.Registry
-	authorize func(http.Handler) http.Handler
+	authorize func(http.ResponseWriter, *http.Request, string, string, http.Handler)
 }
 
 var _ Authorizer = (*authorizingRegistry)(nil)
 
-func (r *authorizingRegistry) Authorize(next http.Handler) http.Handler {
-	return r.authorize(next)
+func (r *authorizingRegistry) Authorize(w http.ResponseWriter, req *http.Request, repo, reference string, next http.Handler) {
+	r.authorize(w, req, repo, reference, next)
 }
 
 func TestServerAuthorizerOnlyAppliesToOCIRoutes(t *testing.T) {
@@ -122,8 +122,11 @@ func TestServerAuthorizerOnlyAppliesToOCIRoutes(t *testing.T) {
 		}
 	}
 	backend := &authorizingRegistry{
-		Registry:  (*oci.Funcs)(nil),
-		authorize: middleware("auth"),
+		Registry: (*oci.Funcs)(nil),
+		authorize: func(w http.ResponseWriter, r *http.Request, _, _ string, next http.Handler) {
+			calls = append(calls, "auth")
+			next.ServeHTTP(w, r)
+		},
 	}
 	srv, err := New(backend, &ServerConfig{
 		Middlewares: []func(http.Handler) http.Handler{middleware("root")},
@@ -158,16 +161,16 @@ func TestServerAuthorizerPassesContextToRegistry(t *testing.T) {
 			require.Equal(t, digest, got)
 			return oci.Descriptor{Digest: digest, Size: 4}, nil
 		}},
-		authorize: func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Authorization") != "Bearer valid" {
-					w.Header().Set("WWW-Authenticate", challenge)
-					returnError(w, ErrUnauthorized())
-					return
-				}
-				ctx := context.WithValue(r.Context(), identityKey{}, "alice")
-				next.ServeHTTP(w, r.WithContext(ctx))
-			})
+		authorize: func(w http.ResponseWriter, r *http.Request, repo, reference string, next http.Handler) {
+			require.Equal(t, "example/app", repo)
+			require.Equal(t, digest.String(), reference)
+			if r.Header.Get("Authorization") != "Bearer valid" {
+				w.Header().Set("WWW-Authenticate", challenge)
+				returnError(w, ErrUnauthorized())
+				return
+			}
+			ctx := context.WithValue(r.Context(), identityKey{}, "alice")
+			next.ServeHTTP(w, r.WithContext(ctx))
 		},
 	}
 	srv, err := New(backend, nil)
@@ -192,10 +195,8 @@ func TestServerAuthorizerPassesContextToRegistry(t *testing.T) {
 func TestServerAuthorizerCanRedirect(t *testing.T) {
 	backend := &authorizingRegistry{
 		Registry: (*oci.Funcs)(nil),
-		authorize: func(http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, "/login", http.StatusFound)
-			})
+		authorize: func(w http.ResponseWriter, r *http.Request, _, _ string, _ http.Handler) {
+			http.Redirect(w, r, "/login", http.StatusFound)
 		},
 	}
 	srv, err := New(backend, nil)
@@ -212,6 +213,50 @@ func TestServerAuthorizerCanRedirect(t *testing.T) {
 		srv.ServeHTTP(rec, httptest.NewRequest(request.method, request.target, nil))
 		require.Equal(t, http.StatusFound, rec.Code)
 		require.Equal(t, "/login", rec.Header().Get("Location"))
+	}
+}
+
+func TestServerAuthorizerReceivesRepositoryAndReference(t *testing.T) {
+	digest := ocidigest.FromBytes([]byte("blob")).String()
+	for _, request := range []struct {
+		method, target, repo, reference string
+	}{
+		{http.MethodGet, "/v2/", "", ""},
+		{http.MethodGet, "/v2/team/example/app/manifests/latest", "team/example/app", "latest"},
+		{http.MethodHead, "/v2/example/app/manifests/" + digest, "example/app", digest},
+		{http.MethodPut, "/v2/example/app/manifests/release", "example/app", "release"},
+		{http.MethodDelete, "/v2/example/app/manifests/" + digest, "example/app", digest},
+		{http.MethodGet, "/v2/example/app/blobs/" + digest, "example/app", digest},
+		{http.MethodHead, "/v2/example/app/blobs/" + digest, "example/app", digest},
+		{http.MethodDelete, "/v2/example/app/blobs/" + digest, "example/app", digest},
+		{http.MethodGet, "/v2/example/app/referrers/" + digest, "example/app", digest},
+		{http.MethodGet, "/v2/example/app/tags/list?last=release", "example/app", ""},
+		{http.MethodPost, "/v2/example/app/blobs/uploads/?mount=" + digest + "&from=source", "example/app", ""},
+		{http.MethodPost, "/v2/example/app/blobs/uploads/?digest=" + digest, "example/app", ""},
+		{http.MethodGet, "/v2/example/app/blobs/uploads/session", "example/app", ""},
+		{http.MethodPatch, "/v2/example/app/blobs/uploads/session", "example/app", ""},
+		{http.MethodPut, "/v2/example/app/blobs/uploads/session?digest=" + digest, "example/app", ""},
+		{http.MethodDelete, "/v2/example/app/blobs/uploads/session", "example/app", ""},
+	} {
+		t.Run(request.method+" "+request.target, func(t *testing.T) {
+			var calls int
+			backend := &authorizingRegistry{
+				Registry: (*oci.Funcs)(nil),
+				authorize: func(w http.ResponseWriter, _ *http.Request, repo, reference string, _ http.Handler) {
+					calls++
+					require.Equal(t, request.repo, repo)
+					require.Equal(t, request.reference, reference)
+					w.WriteHeader(http.StatusNoContent)
+				},
+			}
+			srv, err := New(backend, nil)
+			require.NoError(t, err)
+			require.Zero(t, calls, "authorization is a per-request hook")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(request.method, request.target, nil))
+			require.Equal(t, http.StatusNoContent, rec.Code)
+			require.Equal(t, 1, calls)
+		})
 	}
 }
 

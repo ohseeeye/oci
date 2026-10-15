@@ -93,55 +93,72 @@ configuration and its middleware slice.
 ## Authentication and authorization
 
 If the backend passed to `New` also implements `ociserver.Authorizer`, the server
-automatically applies its HTTP middleware to the built-in OCI routes:
+automatically calls its HTTP authorization hook for matched built-in OCI requests:
 
 ```go
 type Authorizer interface {
-    Authorize(next http.Handler) http.Handler
+    Authorize(w http.ResponseWriter, r *http.Request, repo, reference string, next http.Handler)
 }
 ```
 
-The returned handler can parse and validate credentials, attach an identity to
-the request context, and decide whether to call `next`. Registry methods receive
-that context and can enforce permissions using the same registry's policy. The
-registry implementation chooses the identity type and authentication mechanism;
-`ociserver` does not configure credentials or a token service.
+`Authorize` can parse and validate credentials, attach an identity to the request
+context, and call `next.ServeHTTP(w, r.WithContext(ctx))` to continue. Registry
+methods receive that context and can enforce permissions using the same
+registry's policy. The registry implementation chooses the identity type and
+authentication mechanism; `ociserver` does not configure credentials or a token
+service.
 
-The middleware owns authentication failure responses, including
+The hook owns authentication failure responses, including
 `WWW-Authenticate` challenges, denials, and browser login redirects. It has access
 to the original HTTP request and response writer.
 
-For example, an application can package its existing HTTP auth middleware with
-the registry. This snippet uses `net/http`, `oci`, and `ociserver`:
+Repository names and references are extracted by the router before `Authorize`
+runs. The values have these meanings:
+
+| Request | `repo` | `reference` |
+|---------|--------|-------------|
+| `/v2/` discovery | Empty | Empty |
+| Manifest operations | Repository name | Tag or digest from the path |
+| Blob operations and referrers | Repository name | Digest from the path |
+| Tag history | Repository name | Tag from the path |
+| Tag listing and upload sessions | Repository name | Empty |
+
+These are the routed path values, before the OCI handlers validate them. Tags
+are not resolved to digests before authorization. Upload session IDs and query
+parameters are not content references; mount source repositories and upload
+digests remain available through `r.URL.Query()`.
+
+For example, an application can package its auth hook with the registry. This
+snippet uses `net/http`, `oci`, and `ociserver`:
 
 ```go
 type securedRegistry struct {
     oci.Registry
-    middleware func(http.Handler) http.Handler
+    authorize func(http.ResponseWriter, *http.Request, string, string, http.Handler)
 }
 
 var _ ociserver.Authorizer = (*securedRegistry)(nil)
 
-func (r *securedRegistry) Authorize(next http.Handler) http.Handler {
-    return r.middleware(next)
+func (r *securedRegistry) Authorize(w http.ResponseWriter, req *http.Request, repo, reference string, next http.Handler) {
+    r.authorize(w, req, repo, reference, next)
 }
 ```
 
-Pass `&securedRegistry{Registry: backend, middleware: authenticate}` to `New`,
-where `authenticate` is the application's HTTP auth middleware. No auth field
-in `ServerConfig` is needed. This replaces the former `AuthMiddleware` field.
+Pass `&securedRegistry{Registry: backend, authorize: authorizeRequest}` to `New`,
+where `authorizeRequest` is the application's auth hook. No auth field in
+`ServerConfig` is needed. This replaces the former `AuthMiddleware` field.
 
-The middleware runs before the OCI handlers, including `/v2/` discovery, uploads,
+The hook runs before the OCI handlers, including `/v2/` discovery, uploads,
 and optional tag-history routes. `ServerConfig.Middlewares` run outside it.
 Custom routes, including login and callback endpoints registered through `Mux`,
 do not receive it; protect those separately when needed. A registry without
 `Authorizer` supplies no HTTP authentication through this mechanism.
 
-`Authorize` is called during construction and may be called for multiple routes;
-the returned handlers must support concurrent requests. Outer registry wrappers
-must explicitly preserve `Authorizer` for automatic detection to work. Direct Go
-calls do not pass through this HTTP middleware; a registry that checks identity
-in its methods must also support an appropriate context for those callers.
+`Authorize` runs once per matched request and must support concurrent requests.
+Outer registry wrappers must explicitly preserve `Authorizer` for automatic
+detection to work. Direct Go calls do not pass through this HTTP middleware;
+a registry that checks identity in its methods must also support an appropriate
+context for those callers.
 
 ## Blob redirects
 
