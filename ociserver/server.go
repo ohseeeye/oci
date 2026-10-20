@@ -23,9 +23,6 @@ type ServerConfig struct {
 	// routes added through [Server.Mux]. They are applied in the order provided;
 	// the first middleware is the outermost middleware.
 	Middlewares []func(http.Handler) http.Handler
-
-	// AuthMiddleware, when non-nil, is applied only to the built-in OCI routes.
-	AuthMiddleware func(http.Handler) http.Handler
 }
 
 // Server contains everything necessary to run the API portion of the service
@@ -40,7 +37,8 @@ var _ http.Handler = (*Server)(nil)
 
 // New returns a new server backed by pers. A nil cfg is equivalent to a
 // pointer to a zero [ServerConfig]. The configuration is copied before New
-// returns and may be modified by the caller afterward.
+// returns and may be modified by the caller afterward. When pers implements
+// [Authorizer], its middleware is applied to the built-in OCI routes.
 func New(pers oci.Registry, cfg0 *ServerConfig) (*Server, error) {
 	var cfg ServerConfig
 	if cfg0 != nil {
@@ -98,8 +96,19 @@ func (s *Server) addRoutes() {
 	}
 
 	r.Route("/v2", func(r mux.Router) {
-		if s.cfg.AuthMiddleware != nil {
-			r.Use(s.cfg.AuthMiddleware)
+		if authorizer, ok := s.db.(Authorizer); ok {
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					reference := mux.URLParam(r, "reference")
+					if reference == "" {
+						reference = mux.URLParam(r, "digest")
+					}
+					if reference == "" {
+						reference = mux.URLParam(r, "tag")
+					}
+					authorizer.Authorize(w, r, mux.URLParam(r, "name"), reference, next)
+				})
+			})
 		}
 		r.Use(validateRepositoryName)
 
@@ -170,6 +179,26 @@ func returnError(w http.ResponseWriter, oe *OCIError) {
 	}
 	w.WriteHeader(oe.status)
 	_, _ = w.Write(b)
+}
+
+// Authorizer provides registry-owned HTTP authentication and authorization.
+// New detects this optional interface on the supplied registry and applies it
+// to every built-in OCI route, including /v2/ and optional extension routes.
+// ServerConfig.Middlewares run outside it; custom routes added through Server.Mux
+// do not receive it.
+type Authorizer interface {
+	// Authorize handles authentication and authorization for a matched request.
+	// repo is the repository name extracted from the path, or empty for /v2/.
+	// reference is the manifest tag/digest, blob/referrer digest, or history tag
+	// extracted from the path. Listings and upload sessions have no reference;
+	// upload IDs and query parameters are not treated as references.
+	//
+	// These are routed path values, not resolved descriptors. Name, reference,
+	// and content validation happen afterward in the OCI handlers. Authorize may
+	// attach an identity using r.WithContext and call next.ServeHTTP to continue.
+	// Otherwise it must write the challenge, denial, or login redirect itself.
+	// It runs once per matched request and must support concurrent requests.
+	Authorize(w http.ResponseWriter, r *http.Request, repo, reference string, next http.Handler)
 }
 
 // Redirecter provides storage-backed URL generation for blob redirects.

@@ -73,6 +73,9 @@ func (s *Server) tagHistoryGet(history oci.TagHistory) http.HandlerFunc {
 		}
 		entries, err := oci.All(history.TagHistory(r.Context(), repo, tag, &params))
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			switch {
 			case errors.Is(err, oci.ErrNameUnknown), errors.Is(err, oci.ErrManifestUnknown):
 				entries = nil // Unknown repository or tag has an empty history.

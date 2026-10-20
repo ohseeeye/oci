@@ -1,9 +1,29 @@
 package ociserver
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 )
+
+// AuthError is an authentication or authorization failure that supplies its own
+// HTTP response, such as a challenge, denial, or login redirect. Registry methods
+// may return it directly or wrap it. It is handled before normal OCI error mapping.
+// Return it before response streaming begins; reader errors cannot redirect a
+// response that has already been sent. Implementations must support concurrent use.
+type AuthError interface {
+	error
+	http.Handler
+}
+
+func returnAuthError(w http.ResponseWriter, r *http.Request, err error) bool {
+	var authErr AuthError
+	if !errors.As(err, &authErr) {
+		return false
+	}
+	authErr.ServeHTTP(w, r)
+	return true
+}
 
 // OCIError is a struct that implements the error interface, and formats errors in a way that adheres
 // to the OCI distribution spec

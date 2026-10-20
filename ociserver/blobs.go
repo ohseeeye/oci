@@ -25,6 +25,9 @@ func (s *Server) blobHeadGet() http.HandlerFunc {
 		}
 		blob, err := s.db.ResolveBlob(r.Context(), name, dgst)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrBlobUnknown) || errors.Is(err, oci.ErrNameUnknown) {
 				returnError(w, ErrBlobUnknown(dgst.String()))
 				return
@@ -44,6 +47,9 @@ func (s *Server) blobHeadGet() http.HandlerFunc {
 			if s.redirect != nil {
 				redirect, redirectURL, err := s.redirect.Redirect(r, blob, name)
 				if err != nil {
+					if returnAuthError(w, r, err) {
+						return
+					}
 					s.logError(r.Context(), "getting blob redirect", err, "repository", name, "digest", dgstStr)
 					returnError(w, ErrServerError())
 					return
@@ -106,6 +112,9 @@ func (s *Server) blobHeadGet() http.HandlerFunc {
 				}
 				br, err = s.db.GetBlobRange(r.Context(), name, dgst, bi, ei+1)
 				if err != nil {
+					if returnAuthError(w, r, err) {
+						return
+					}
 					s.logError(r.Context(), "getting blob range", err, "repository", name, "digest", dgstStr)
 					returnError(w, ErrServerError())
 					return
@@ -119,6 +128,9 @@ func (s *Server) blobHeadGet() http.HandlerFunc {
 			} else {
 				br, err = s.db.GetBlob(r.Context(), name, dgst)
 				if err != nil {
+					if returnAuthError(w, r, err) {
+						return
+					}
 					s.logError(r.Context(), "getting blob", err, "repository", name, "digest", dgstStr)
 					returnError(w, ErrServerError())
 					return
@@ -157,6 +169,9 @@ func (s *Server) blobDelete() http.HandlerFunc {
 
 		err = s.db.DeleteBlob(r.Context(), name, dgst)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrBlobUnknown) || errors.Is(err, oci.ErrNameUnknown) {
 				returnError(w, ErrBlobUnknown(dgst.String()))
 				return

@@ -24,6 +24,9 @@ func (s *Server) blobUploadGet() http.HandlerFunc {
 		}
 		bw, err := s.db.PushBlobChunkedResume(r.Context(), name, session, -1, 0)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrBlobUploadUnknown) {
 				returnError(w, ErrBlobUploadInvalid("session not found"))
 				return
@@ -49,6 +52,9 @@ func (s *Server) blobUploadDelete() http.HandlerFunc {
 		}
 		bw, err := s.db.PushBlobChunkedResume(r.Context(), name, session, -1, 0)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrBlobUploadUnknown) {
 				returnError(w, ErrBlobUploadInvalid("session not found"))
 				return
@@ -59,6 +65,9 @@ func (s *Server) blobUploadDelete() http.HandlerFunc {
 		}
 		err = bw.Cancel()
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			s.logError(r.Context(), "canceling upload session", err, "repository", name, "session", session)
 			returnError(w, ErrServerError())
 			return
@@ -99,6 +108,9 @@ func (s *Server) blobUploadPost() http.HandlerFunc {
 
 			blob, err := s.db.MountBlob(r.Context(), from, name, mountDigest)
 			if err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				goto FALLBACK
 			}
 			// TODO: solve eventing.
@@ -119,12 +131,18 @@ func (s *Server) blobUploadPost() http.HandlerFunc {
 			}
 			bw, err := s.db.PushBlobChunked(r.Context(), name, length)
 			if err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				s.logError(r.Context(), "starting blob upload", err, "repository", name)
 				returnError(w, ErrServerError())
 				return
 			}
 			_, err = io.Copy(bw, r.Body)
 			if err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				s.logError(r.Context(), "writing blob upload", err, "repository", name)
 				returnError(w, ErrServerError())
 				return
@@ -134,12 +152,18 @@ func (s *Server) blobUploadPost() http.HandlerFunc {
 				s.logError(r.Context(), "closing blob upload request body", err, "repository", name)
 			}
 			if err = bw.Close(); err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				s.logError(r.Context(), "closing blob writer", err, "repository", name)
 				returnError(w, ErrServerError())
 				return
 			}
 			desc, err := bw.Commit(dgst)
 			if err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				if errors.Is(err, oci.ErrDigestInvalid) {
 					returnError(w, ErrDigestInvalid("digest does not match contents"))
 					return
@@ -158,6 +182,9 @@ func (s *Server) blobUploadPost() http.HandlerFunc {
 	FALLBACK:
 		bw, err := s.db.PushBlobChunked(r.Context(), name, 0)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			s.logError(r.Context(), "creating blob upload session", err, "repository", name)
 			returnError(w, ErrServerError())
 			return
@@ -208,6 +235,9 @@ func (s *Server) blobUploadPatch() http.HandlerFunc {
 
 		bw, err := s.db.PushBlobChunkedResume(r.Context(), name, session, int64(rangeStart), size)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrRangeInvalid) {
 				returnError(w, ErrBlobUploadOutOfOrder())
 				return
@@ -219,6 +249,9 @@ func (s *Server) blobUploadPatch() http.HandlerFunc {
 		if size > 0 || streaming {
 			n, err := io.Copy(bw, r.Body)
 			if err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				if errors.Is(err, oci.ErrRangeInvalid) {
 					returnError(w, ErrBlobUploadOutOfOrder())
 					return
@@ -239,6 +272,9 @@ func (s *Server) blobUploadPatch() http.HandlerFunc {
 			s.logError(r.Context(), "closing blob upload request body", err, "repository", name, "session", session)
 		}
 		if err = bw.Close(); err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			s.logError(r.Context(), "closing blob writer", err, "repository", name, "session", session)
 			returnError(w, ErrServerError())
 			return
@@ -299,6 +335,9 @@ func (s *Server) blobUploadPut() http.HandlerFunc {
 
 			bw, err := s.db.PushBlobChunkedResume(r.Context(), name, session, int64(rangeStart), size)
 			if err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				if errors.Is(err, oci.ErrRangeInvalid) {
 					returnError(w, ErrBlobUploadOutOfOrder())
 					return
@@ -309,6 +348,9 @@ func (s *Server) blobUploadPut() http.HandlerFunc {
 			}
 			_, err = io.Copy(bw, r.Body)
 			if err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				if errors.Is(err, oci.ErrRangeInvalid) {
 					returnError(w, ErrBlobUploadOutOfOrder())
 					return
@@ -322,6 +364,9 @@ func (s *Server) blobUploadPut() http.HandlerFunc {
 				s.logError(r.Context(), "closing blob upload request body", err, "repository", name, "session", session)
 			}
 			if err = bw.Close(); err != nil {
+				if returnAuthError(w, r, err) {
+					return
+				}
 				s.logError(r.Context(), "closing blob writer", err, "repository", name, "session", session)
 				returnError(w, ErrServerError())
 				return
@@ -329,6 +374,9 @@ func (s *Server) blobUploadPut() http.HandlerFunc {
 		}
 		bw, err := s.db.PushBlobChunkedResume(r.Context(), name, session, -1, 0)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if !errors.Is(err, oci.ErrBlobUploadUnknown) {
 				s.logError(r.Context(), "getting blob upload session for commit", err, "repository", name, "session", session)
 			}
@@ -337,6 +385,9 @@ func (s *Server) blobUploadPut() http.HandlerFunc {
 		}
 		_, err = bw.Commit(dgst)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrDigestInvalid) {
 				returnError(w, ErrDigestInvalid("digest does not match contents"))
 				return

@@ -40,6 +40,9 @@ func (s *Server) manifestHeadGet() http.HandlerFunc {
 			desc, err = s.db.ResolveTag(r.Context(), name, reference)
 		}
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrManifestUnknown) || errors.Is(err, oci.ErrNameUnknown) {
 				returnError(w, ErrManifestUnknown(reference))
 				return
@@ -65,6 +68,9 @@ func (s *Server) manifestHeadGet() http.HandlerFunc {
 
 		b, err := s.db.GetManifest(r.Context(), name, desc.Digest)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			s.logError(r.Context(), "getting manifest", err, "repository", name, "reference", reference)
 			returnError(w, ErrServerError())
 			return
@@ -242,6 +248,9 @@ func (s *Server) manifestPut() http.HandlerFunc {
 		}
 		_, err = s.db.PushManifest(r.Context(), name, b, contentType, params)
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrManifestBlobUnknown) {
 				returnError(w, ErrManifestBlobUnknown(err.Error()))
 				return
@@ -298,6 +307,9 @@ func (s *Server) manifestDelete() http.HandlerFunc {
 			err = s.db.DeleteTag(r.Context(), name, reference)
 		}
 		if err != nil {
+			if returnAuthError(w, r, err) {
+				return
+			}
 			if errors.Is(err, oci.ErrManifestUnknown) || errors.Is(err, oci.ErrNameUnknown) {
 				returnError(w, ErrManifestUnknown(reference))
 				return
