@@ -54,6 +54,7 @@ finish active operations before closing a backend that owns resources.
 The built-in routes under `/v2` cover:
 
 - Registry discovery at `GET /v2/`.
+- Repository listing via the [catalog endpoint](https://distribution.github.io/distribution/spec/api/#listing-repositories) (`GET /v2/_catalog`).
 - Blob GET, HEAD, byte-range reads, and deletion.
 - Blob uploads, resumable upload sessions, cancellation, and cross-repository mounts.
 - Manifest GET and HEAD by tag or digest, PUT, and deletion by tag or digest.
@@ -62,7 +63,7 @@ The built-in routes under `/v2` cover:
 
 Storage operations are delegated to the supplied backend. Manifest PUT accepts
 OCI image manifests and indexes, and Docker schema 2 manifests and manifest lists,
-with a 4 MiB request-body limit. There is no built-in repository catalog endpoint.
+with a 4 MiB request-body limit.
 
 ## Configuration and custom routes
 
@@ -118,6 +119,7 @@ runs. The values have these meanings:
 | Request | `repo` | `reference` |
 |---------|--------|-------------|
 | `/v2/` discovery | Empty | Empty |
+| `/v2/_catalog` | Empty | Empty |
 | Manifest operations | Repository name | Tag or digest from the path |
 | Blob operations and referrers | Repository name | Digest from the path |
 | Tag history | Repository name | Tag from the path |
