@@ -206,6 +206,7 @@ func TestServerAuthorizerCanRedirect(t *testing.T) {
 	require.NoError(t, err)
 	for _, request := range []struct{ method, target string }{
 		{http.MethodGet, "/v2/"},
+		{http.MethodGet, "/v2/_catalog"},
 		{http.MethodGet, "/v2/example/manifests/latest"},
 		{http.MethodPost, "/v2/example/blobs/uploads/"},
 		{http.MethodPatch, "/v2/example/blobs/uploads/session"},
@@ -225,6 +226,7 @@ func TestServerAuthorizerReceivesRepositoryAndReference(t *testing.T) {
 		method, target, repo, reference string
 	}{
 		{http.MethodGet, "/v2/", "", ""},
+		{http.MethodGet, "/v2/_catalog?n=2&last=team/app", "", ""},
 		{http.MethodGet, "/v2/team/example/app/manifests/latest", "team/example/app", "latest"},
 		{http.MethodHead, "/v2/example/app/manifests/" + digest, "example/app", digest},
 		{http.MethodPut, "/v2/example/app/manifests/release", "example/app", "release"},
@@ -347,6 +349,7 @@ func TestServerRegistryMethodsCanReturnAuthErrors(t *testing.T) {
 		{http.MethodGet, "/v2/example/blobs/" + digest.String(), "GetBlobRange", "", "bytes=0-1"},
 		{http.MethodDelete, "/v2/example/blobs/" + digest.String(), "DeleteBlob", "", ""},
 		{http.MethodGet, "/v2/example/tags/list", "Tags", "", ""},
+		{http.MethodGet, "/v2/_catalog", "Repositories", "", ""},
 		{http.MethodGet, "/v2/example/referrers/" + digest.String(), "Referrers", "", ""},
 		{http.MethodPost, "/v2/example/blobs/uploads/", "PushBlobChunked", "", ""},
 		{http.MethodPost, "/v2/example/blobs/uploads/?digest=" + digest.String(), "PushBlobChunked", "blob", ""},
@@ -365,7 +368,11 @@ func TestServerRegistryMethodsCanReturnAuthErrors(t *testing.T) {
 			backend := &oci.Funcs{NewError: func(_ context.Context, operation, repo string) error {
 				calls++
 				require.Equal(t, test.operation, operation)
-				require.Equal(t, "example", repo)
+				if test.operation == "Repositories" {
+					require.Empty(t, repo)
+				} else {
+					require.Equal(t, "example", repo)
+				}
 				return fmt.Errorf("operation failed: %w", authErr)
 			}}
 			if test.operation == "PushBlobChunkedResume" {

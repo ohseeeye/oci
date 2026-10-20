@@ -113,6 +113,7 @@ func (s *Server) addRoutes() {
 		r.Use(validateRepositoryName)
 
 		r.Handle("/", s.root())
+		r.Get("/_catalog", s.catalogGet())
 
 		// blob uploads
 		r.Post("/*name/blobs/uploads/", s.blobUploadPost())
@@ -188,7 +189,8 @@ func returnError(w http.ResponseWriter, oe *OCIError) {
 // do not receive it.
 type Authorizer interface {
 	// Authorize handles authentication and authorization for a matched request.
-	// repo is the repository name extracted from the path, or empty for /v2/.
+	// repo is the repository name extracted from the path, or empty for /v2/
+	// discovery and /v2/_catalog. Catalog requests also have an empty reference.
 	// reference is the manifest tag/digest, blob/referrer digest, or history tag
 	// extracted from the path. Listings and upload sessions have no reference;
 	// upload IDs and query parameters are not treated as references.
