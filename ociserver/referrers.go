@@ -13,10 +13,14 @@ import (
 )
 
 func marshalIndexResponse(descs []oci.Descriptor) ([]byte, error) {
-	return json.Marshal(map[string]any{
-		"schemaVersion": 2,
-		"mediaType":     oci.MediaTypeImageIndex,
-		"manifests":     descs,
+	return json.Marshal(struct {
+		SchemaVersion int              `json:"schemaVersion"`
+		MediaType     string           `json:"mediaType"`
+		Manifests     []oci.Descriptor `json:"manifests"`
+	}{
+		SchemaVersion: 2,
+		MediaType:     oci.MediaTypeImageIndex,
+		Manifests:     descs,
 	})
 }
 

@@ -100,6 +100,9 @@ type IndexOrManifest struct {
 	// ArtifactType specifies the IANA media type of artifact when the manifest is used for an artifact.
 	ArtifactType string `json:"artifactType,omitempty"`
 
+	// Subject is an optional link from the image manifest to another manifest forming an association between the image manifest and the other manifest.
+	Subject *Descriptor `json:"subject,omitempty"`
+
 	// Manifests references platform specific manifests.
 	Manifests []Descriptor `json:"manifests"`
 
@@ -109,9 +112,6 @@ type IndexOrManifest struct {
 
 	// Layers is an indexed list of layers referenced by the manifest.
 	Layers []Descriptor `json:"layers"`
-
-	// Subject is an optional link from the image manifest to another manifest forming an association between the image manifest and the other manifest.
-	Subject *Descriptor `json:"subject,omitempty"`
 
 	// Annotations contains arbitrary metadata for the image manifest.
 	Annotations map[string]string `json:"annotations,omitempty"`
@@ -172,43 +172,49 @@ func (m IndexOrManifest) Validate() error {
 	return nil
 }
 
-// MarshalJSON validates m before encoding it as JSON.
+// MarshalJSON validates m before encoding it as JSON. Top-level fields are
+// emitted in the order schemaVersion, mediaType, artifactType, subject, content
+// (manifests or config/layers), then annotations, omitting optional empty fields.
+// Annotation map keys retain encoding/json's lexical ordering. Re-encoding an
+// existing document can change its bytes and therefore its content digest.
 func (m IndexOrManifest) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
 	type common struct {
-		SchemaVersion int               `json:"schemaVersion"`
-		MediaType     string            `json:"mediaType,omitempty"`
-		ArtifactType  string            `json:"artifactType,omitempty"`
-		Subject       *Descriptor       `json:"subject,omitempty"`
-		Annotations   map[string]string `json:"annotations,omitempty"`
+		SchemaVersion int         `json:"schemaVersion"`
+		MediaType     string      `json:"mediaType,omitempty"`
+		ArtifactType  string      `json:"artifactType,omitempty"`
+		Subject       *Descriptor `json:"subject,omitempty"`
 	}
 	c := common{
 		SchemaVersion: m.SchemaVersion,
 		MediaType:     m.MediaType,
 		ArtifactType:  m.ArtifactType,
 		Subject:       m.Subject,
-		Annotations:   m.Annotations,
 	}
 	switch m.MediaType {
 	case MediaTypeImageIndex, MediaTypeDockerManifestList:
 		return json.Marshal(struct {
 			common
-			Manifests []Descriptor `json:"manifests"`
+			Manifests   []Descriptor      `json:"manifests"`
+			Annotations map[string]string `json:"annotations,omitempty"`
 		}{
-			common:    c,
-			Manifests: m.Manifests,
+			common:      c,
+			Manifests:   m.Manifests,
+			Annotations: m.Annotations,
 		})
 	case MediaTypeImageManifest, MediaTypeDockerManifest:
 		return json.Marshal(struct {
 			common
-			Config *Descriptor  `json:"config"`
-			Layers []Descriptor `json:"layers"`
+			Config      *Descriptor       `json:"config"`
+			Layers      []Descriptor      `json:"layers"`
+			Annotations map[string]string `json:"annotations,omitempty"`
 		}{
-			common: c,
-			Config: m.Config,
-			Layers: m.Layers,
+			common:      c,
+			Config:      m.Config,
+			Layers:      m.Layers,
+			Annotations: m.Annotations,
 		})
 	default:
 		type indexOrManifest IndexOrManifest
