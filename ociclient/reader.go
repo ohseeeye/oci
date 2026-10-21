@@ -35,7 +35,14 @@ func (c *Client) GetBlob(ctx context.Context, repo string, digest oci.Digest) (o
 }
 
 // GetBlobRange is like GetBlob but asks for only the given byte range.
+// If the registry ignores Range and returns the full blob, it discards the
+// prefix and limits the returned stream locally. This may transfer extra data,
+// but does not buffer the whole blob. The descriptor describes the full blob;
+// partial reads do not verify its digest.
 func (c *Client) GetBlobRange(ctx context.Context, repo string, digest oci.Digest, o0, o1 int64) (_ oci.BlobReader, _err error) {
+	if o0 < 0 || (o1 >= 0 && o1 < o0) {
+		return nil, fmt.Errorf("invalid blob range [%d, %d): %w", o0, o1, oci.ErrRangeInvalid)
+	}
 	if o0 == 0 && o1 < 0 {
 		return c.GetBlob(ctx, repo, digest)
 	}
@@ -45,22 +52,58 @@ func (c *Client) GetBlobRange(ctx context.Context, repo string, digest oci.Diges
 	}
 	if o1 < 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", o0))
-	} else {
+	} else if o1 > o0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", o0, o1-1))
 	}
+	// Empty ranges cannot be expressed with an HTTP Range header. A full
+	// response provides the descriptor and is limited to zero bytes below.
 	resp, err := c.do(req, http.StatusOK, http.StatusPartialContent)
 	if err != nil {
 		return nil, err
 	}
-	// TODO this is wrong when the server returns a 200 response.
-	// Fix that either by returning ErrUnsupported or by reading the whole
-	// blob and returning only the required portion.
 	defer closeOnError(&_err, resp.Body)
 	desc, err := descriptorFromResponse(resp, digest, requireSize)
 	if err != nil {
 		return nil, fmt.Errorf("invalid descriptor in response: %v", err)
 	}
-	return newBlobReaderUnverified(resp.Body, desc), nil
+	body := resp.Body
+	if resp.StatusCode == http.StatusOK {
+		end := desc.Size
+		if o1 >= 0 && o1 < end {
+			end = o1
+		}
+		if o0 > end {
+			return nil, fmt.Errorf("blob range starts at %d beyond size %d: %w", o0, desc.Size, oci.ErrRangeInvalid)
+		}
+		if end > o0 {
+			if _, err := io.CopyN(io.Discard, resp.Body, o0); err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return nil, fmt.Errorf("cannot skip blob prefix: %w", err)
+			}
+		}
+		body = &blobRangeReader{
+			LimitedReader: io.LimitedReader{R: resp.Body, N: end - o0},
+			Closer:        resp.Body,
+		}
+	}
+	return newBlobReaderUnverified(body, desc), nil
+}
+
+// blobRangeReader limits a full HTTP response while retaining ownership of its
+// body. A short response must not look like a successful end of the range.
+type blobRangeReader struct {
+	io.LimitedReader
+	io.Closer
+}
+
+func (r *blobRangeReader) Read(p []byte) (int, error) {
+	n, err := r.LimitedReader.Read(p)
+	if err == io.EOF && r.N > 0 {
+		err = io.ErrUnexpectedEOF
+	}
+	return n, err
 }
 
 // ResolveBlob returns the descriptor for the blob with the given digest.
