@@ -66,7 +66,7 @@ func (c *Client) GetBlobRange(ctx context.Context, repo string, digest oci.Diges
 	if err != nil {
 		return nil, fmt.Errorf("invalid descriptor in response: %v", err)
 	}
-	var body io.ReadCloser = resp.Body
+	body := resp.Body
 	if resp.StatusCode == http.StatusOK {
 		end := desc.Size
 		if o1 >= 0 && o1 < end {
