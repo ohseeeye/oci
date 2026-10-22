@@ -179,7 +179,7 @@ func (c *Client) read(req *http.Request, knownDigest oci.Digest, isManifest bool
 	if err != nil {
 		return nil, fmt.Errorf("invalid descriptor in response: %v", err)
 	}
-	if resp.Header.Get("Content-Type") == mediaTypeSchema1SignedManifest {
+	if resp.Header.Get("Content-Type") == oci.MediaTypeDockerSchema1SignedManifest {
 		// Legacy signed Docker schema1 manifest: strip the libtrust
 		// signature envelope here, once, so that the verification
 		// below (and every caller of this method) only ever sees a
@@ -200,7 +200,7 @@ func (c *Client) read(req *http.Request, knownDigest oci.Digest, isManifest bool
 		if err != nil {
 			return nil, fmt.Errorf("cannot unsign schema1 manifest: %w", err)
 		}
-		desc.MediaType = mediaTypeSchema1Manifest
+		desc.MediaType = oci.MediaTypeDockerSchema1Manifest
 		desc.Size = int64(len(unsigned))
 		resp.Body = io.NopCloser(bytes.NewReader(unsigned))
 	}
