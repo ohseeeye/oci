@@ -20,15 +20,10 @@ import (
 	"fmt"
 )
 
-// Legacy Docker Manifest v2 Schema 1 media types.
+// Legacy Docker schema 1 signature-envelope handling.
 //
-// Schema1 predates the OCI distribution spec and isn't otherwise supported
-// by this module (see [oci.IndexOrManifest.Validate]), but some registries
-// (notably Docker Hub) still serve very old images this way, so ociclient
-// handles reading them.
-//
-// A schema1 manifest fetched from a registry always arrives wrapped in a
-// legacy libtrust JWS-like signature envelope (mediaTypeSchema1SignedManifest),
+// A signed schema1 manifest arrives wrapped in a legacy libtrust JWS-like
+// signature envelope (oci.MediaTypeDockerSchema1SignedManifest),
 // even when the content was never meaningfully "signed" (the signature
 // algorithm is commonly "none"). The digest that registries and tags
 // actually refer to is the digest of the envelope's content with the
@@ -42,10 +37,6 @@ import (
 // See https://github.com/tianon/oci-schema1 and
 // https://github.com/moby/moby/commit/011bfd666eeb21a111ca450c42a3893ad03c9324
 // for more background.
-const (
-	mediaTypeSchema1Manifest       = "application/vnd.docker.distribution.manifest.v1+json"
-	mediaTypeSchema1SignedManifest = "application/vnd.docker.distribution.manifest.v1+prettyjws"
-)
 
 // schema1ProtectedHeader is the JSON shape of the base64url-encoded
 // "protected" field of each entry in a signed schema1 manifest's
@@ -59,8 +50,8 @@ type schema1ProtectedHeader struct {
 }
 
 // schema1Unsign reconstructs the unsigned form of a signed Docker schema1
-// manifest (mediaTypeSchema1SignedManifest) from its raw signed bytes. The
-// sha256 of the returned bytes is the digest that registries and tags refer
+// manifest (oci.MediaTypeDockerSchema1SignedManifest) from its raw signed bytes.
+// The sha256 of the returned bytes is the digest that registries and tags refer
 // to for this manifest.
 func schema1Unsign(signed []byte) ([]byte, error) {
 	var m struct {

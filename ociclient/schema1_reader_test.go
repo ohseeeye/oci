@@ -23,6 +23,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ohseeeye/oci"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/stretchr/testify/require"
 )
@@ -46,12 +47,14 @@ func TestGetManifestSchema1Signed(t *testing.T) {
 		Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, http.MethodGet, req.Method)
 			require.Equal(t, "/v2/library/php/manifests/"+schema1TestDigest.String(), req.URL.Path)
+			require.Contains(t, req.Header.Values("Accept"), oci.MediaTypeDockerSchema1Manifest)
+			require.Contains(t, req.Header.Values("Accept"), oci.MediaTypeDockerSchema1SignedManifest)
 			return &http.Response{
 				StatusCode:    http.StatusOK,
 				Status:        "200 OK",
 				ContentLength: int64(len(signed)),
 				Header: http.Header{
-					"Content-Type":          {mediaTypeSchema1SignedManifest},
+					"Content-Type":          {oci.MediaTypeDockerSchema1SignedManifest},
 					"Docker-Content-Digest": {schema1TestDigest.String()},
 				},
 				Body:    io.NopCloser(bytes.NewReader(signed)),
@@ -66,7 +69,7 @@ func TestGetManifestSchema1Signed(t *testing.T) {
 	defer r.Close()
 
 	desc := r.Descriptor()
-	require.Equal(t, mediaTypeSchema1Manifest, desc.MediaType)
+	require.Equal(t, oci.MediaTypeDockerSchema1Manifest, desc.MediaType)
 	require.Equal(t, schema1TestDigest, desc.Digest)
 
 	data, err := io.ReadAll(r)
@@ -81,6 +84,63 @@ func TestGetManifestSchema1Signed(t *testing.T) {
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(data, &m))
 	require.NotContains(t, m, "signatures")
+
+	var manifest oci.Schema1Manifest
+	require.NoError(t, json.Unmarshal(data, &manifest))
+	require.Equal(t, 1, manifest.SchemaVersion)
+	require.Equal(t, "library/php", manifest.Name)
+	require.Equal(t, "5.3", manifest.Tag)
+	require.Equal(t, "amd64", manifest.Architecture)
+	require.Len(t, manifest.FSLayers, 11)
+	require.Len(t, manifest.History, 11)
+	for _, layer := range manifest.FSLayers {
+		require.NoError(t, layer.BlobSum.Validate())
+	}
+	var wireModel oci.Schema1Manifest
+	require.NoError(t, json.Unmarshal(signed, &wireModel))
+	require.Equal(t, wireModel, manifest, "stripping the envelope must preserve layer and history order")
+
+	// The inner document remains independently decodable by a consumer.
+	var compatibility struct {
+		ContainerConfig struct {
+			Cmd []string `json:"Cmd"`
+		} `json:"container_config"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(manifest.History[0].V1Compatibility), &compatibility))
+	require.Equal(t, []string{"/bin/sh", "-c", "#(nop) CMD [php -a]"}, compatibility.ContainerConfig.Cmd)
+}
+
+func TestGetManifestSchema1Unsigned(t *testing.T) {
+	unsigned, err := schema1Unsign(readSchema1Fixture(t))
+	require.NoError(t, err)
+	client, err := New("registry.example", &Options{
+		Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				ContentLength: int64(len(unsigned)),
+				Header: http.Header{
+					"Content-Type":          {oci.MediaTypeDockerSchema1Manifest},
+					"Docker-Content-Digest": {schema1TestDigest.String()},
+				},
+				Body:    io.NopCloser(bytes.NewReader(unsigned)),
+				Request: req,
+			}, nil
+		}),
+	})
+	require.NoError(t, err)
+	reader, err := client.GetManifest(t.Context(), "library/php", schema1TestDigest)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
+	data, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Equal(t, unsigned, data)
+	require.Equal(t, oci.MediaTypeDockerSchema1Manifest, reader.Descriptor().MediaType)
+	require.Equal(t, schema1TestDigest, reader.Descriptor().Digest)
+	var manifest oci.Schema1Manifest
+	require.NoError(t, json.Unmarshal(data, &manifest))
+	require.Equal(t, "library/php", manifest.Name)
+	require.Len(t, manifest.FSLayers, 11)
+	require.Len(t, manifest.History, 11)
 }
 
 func TestGetTagSchema1Signed(t *testing.T) {
@@ -94,7 +154,7 @@ func TestGetTagSchema1Signed(t *testing.T) {
 				Status:        "200 OK",
 				ContentLength: int64(len(signed)),
 				Header: http.Header{
-					"Content-Type":          {mediaTypeSchema1SignedManifest},
+					"Content-Type":          {oci.MediaTypeDockerSchema1SignedManifest},
 					"Docker-Content-Digest": {schema1TestDigest.String()},
 				},
 				Body:    io.NopCloser(bytes.NewReader(signed)),
@@ -111,7 +171,7 @@ func TestGetTagSchema1Signed(t *testing.T) {
 	data, err := io.ReadAll(r)
 	require.NoError(t, err)
 	require.Equal(t, schema1TestDigest, ocidigest.FromBytes(data))
-	require.Equal(t, mediaTypeSchema1Manifest, r.Descriptor().MediaType)
+	require.Equal(t, oci.MediaTypeDockerSchema1Manifest, r.Descriptor().MediaType)
 }
 
 // TestGetTagSchema1SignedNoDigestHeader exercises registries (like AWS ECR,
@@ -128,7 +188,7 @@ func TestGetTagSchema1SignedNoDigestHeader(t *testing.T) {
 				Status:        "200 OK",
 				ContentLength: int64(len(signed)),
 				Header: http.Header{
-					"Content-Type": {mediaTypeSchema1SignedManifest},
+					"Content-Type": {oci.MediaTypeDockerSchema1SignedManifest},
 				},
 				Body:    io.NopCloser(bytes.NewReader(signed)),
 				Request: req,
@@ -158,7 +218,7 @@ func TestGetManifestSchema1SignedDigestMismatch(t *testing.T) {
 				Status:        "200 OK",
 				ContentLength: int64(len(signed)),
 				Header: http.Header{
-					"Content-Type":          {mediaTypeSchema1SignedManifest},
+					"Content-Type":          {oci.MediaTypeDockerSchema1SignedManifest},
 					"Docker-Content-Digest": {wrongDigest.String()},
 				},
 				Body:    io.NopCloser(bytes.NewReader(signed)),
@@ -183,7 +243,7 @@ func TestResolveManifestSchema1SignedNormalizesMediaType(t *testing.T) {
 				Status:        "200 OK",
 				ContentLength: 20841,
 				Header: http.Header{
-					"Content-Type":          {mediaTypeSchema1SignedManifest},
+					"Content-Type":          {oci.MediaTypeDockerSchema1SignedManifest},
 					"Docker-Content-Digest": {schema1TestDigest.String()},
 				},
 				Body:    http.NoBody,
@@ -198,6 +258,6 @@ func TestResolveManifestSchema1SignedNormalizesMediaType(t *testing.T) {
 	// HEAD has no body to unsign, but the reported media type is
 	// normalized to match what a subsequent GetManifest will return,
 	// so Resolve and Get stay consistent for callers.
-	require.Equal(t, mediaTypeSchema1Manifest, desc.MediaType)
+	require.Equal(t, oci.MediaTypeDockerSchema1Manifest, desc.MediaType)
 	require.Equal(t, schema1TestDigest, desc.Digest)
 }
