@@ -45,6 +45,10 @@ has its own module. External dependencies in the core module support tests.
 | `pkg/ociref` | OCI reference parsing, validation, and normalization. |
 | `pkg/ocitransfer` | Image, index, artifact, and repository copies, plus streaming blob transfers with parallel downloads and sequential chunked uploads. |
 
+`ociref.ParseRelative` parses registry-relative names with optional tags/digests,
+without registry inference or defaults. Callers needing its former Docker-style
+normalization should use `ociref.ParseRelativeDocker` instead.
+
 `oci.TagHistory` is a separate, experimental capability that callers can check
 with a type assertion on an `oci.Registry`. `ocimem`, `ocilayout`, and `ocisqlite` implement it,
 and `ociserver` serves the proposed tag-history endpoint when its backend does.

@@ -18,9 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/ohseeeye/oci/pkg/ocidigest"
 	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
@@ -47,7 +45,7 @@ func FindLayout(path string) (baseDir string, ref ociref.Reference, err error) {
 		if !ok {
 			continue
 		}
-		ref, err := parseLayoutReference(filepath.ToSlash(c.ref))
+		ref, err := ociref.ParseRelative(filepath.ToSlash(c.ref))
 		if err != nil {
 			continue
 		}
@@ -55,47 +53,11 @@ func FindLayout(path string) (baseDir string, ref ociref.Reference, err error) {
 	}
 
 	fallback := candidates[len(candidates)-1]
-	ref, err = parseLayoutReference(filepath.ToSlash(fallback.ref))
+	ref, err = ociref.ParseRelative(filepath.ToSlash(fallback.ref))
 	if err != nil {
 		return "", ociref.Reference{}, err
 	}
 	return fallback.baseDir, ref, nil
-}
-
-func parseLayoutReference(refStr string) (ociref.Reference, error) {
-	var ref ociref.Reference
-	repoAndTag, digestStr, hasDigest := strings.Cut(refStr, "@")
-	if hasDigest {
-		if digestStr == "" {
-			return ociref.Reference{}, fmt.Errorf("invalid reference syntax (%q)", refStr)
-		}
-		digest, err := ocidigest.Parse(digestStr)
-		if err != nil {
-			return ociref.Reference{}, fmt.Errorf("invalid digest %q: %v", digestStr, err)
-		}
-		if err := digest.Validate(); err != nil {
-			return ociref.Reference{}, fmt.Errorf("invalid digest %q: %v", digest, err)
-		}
-		ref.Digest = digest
-	}
-	repo, tag, hasTag := strings.Cut(repoAndTag, ":")
-	if hasTag {
-		if strings.Contains(tag, ":") || strings.Contains(tag, "/") {
-			return ociref.Reference{}, fmt.Errorf("invalid reference syntax (%q)", refStr)
-		}
-		if !ociref.IsValidTag(tag) {
-			return ociref.Reference{}, fmt.Errorf("invalid tag %q", tag)
-		}
-		ref.Tag = tag
-	}
-	if !ociref.IsValidRepository(repo) {
-		return ociref.Reference{}, fmt.Errorf("invalid reference syntax (%q)", refStr)
-	}
-	if len(repo) > 255 {
-		return ociref.Reference{}, fmt.Errorf("repository name too long")
-	}
-	ref.Repository = repo
-	return ref, nil
 }
 
 type layoutCandidate struct {

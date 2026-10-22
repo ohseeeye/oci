@@ -35,11 +35,11 @@ func mustParseDigest(s string) Digest {
 	return digest
 }
 
-var parseReferenceTests = []struct {
+var parseRelativeDockerTests = []struct {
 	testName string
 	// input is the repository name or name component testcase
 	input string
-	// err is the error expected from Parse, or nil
+	// wantErr is the error expected from ParseRelativeDocker, or empty.
 	wantErr string
 	wantRef Reference
 }{
@@ -381,13 +381,13 @@ var parseReferenceTests = []struct {
 	},
 }
 
-func TestParseReference(t *testing.T) {
-	for _, test := range parseReferenceTests {
+func TestParseRelativeDocker(t *testing.T) {
+	for _, test := range parseRelativeDockerTests {
 		if test.testName == "" {
 			test.testName = test.input
 		}
 		t.Run(test.testName, func(t *testing.T) {
-			ref, err := ParseRelative(test.input)
+			ref, err := ParseRelativeDocker(test.input)
 			t.Logf("ref: %#v", ref)
 			if test.wantErr != "" {
 				if test.wantErr == "invalid reference syntax" {
