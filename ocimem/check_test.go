@@ -73,7 +73,7 @@ var pushManifestTests = []struct {
 			MediaType: oci.MediaTypeImageManifest,
 			Config:    ref(content.Blobs["a"]),
 			Layers: []oci.Descriptor{{
-				MediaType: "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip",
+				MediaType: oci.MediaTypeDockerForeignLayerGzip,
 				Size:      1,
 				Digest:    ocitest.DigestRef("b"),
 				URLs:      []string{"https://example.com/foreign-layer"},
@@ -243,7 +243,7 @@ var pushManifestTests = []struct {
 	config: Config{
 		ImmutableTags: true,
 	},
-	mediaType: "application/vnd.docker.container.image.v1+json",
+	mediaType: oci.MediaTypeDockerConfig,
 	tag:       "sometag",
 	manifestData: func(content ocitest.PushedRepoContent) []byte {
 		return content.ManifestData["m"]

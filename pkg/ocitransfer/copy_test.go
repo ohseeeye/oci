@@ -32,7 +32,7 @@ func makeCopyFixture(t *testing.T) copyFixture {
 	t.Helper()
 	r := ocimem.New()
 	content := []byte("shared content")
-	layer := oci.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar", Digest: ocidigest.SHA512.FromBytes(content), Size: int64(len(content))}
+	layer := oci.Descriptor{MediaType: oci.MediaTypeImageLayer, Digest: ocidigest.SHA512.FromBytes(content), Size: int64(len(content))}
 	_, err := r.PushBlob(t.Context(), "source", layer, bytes.NewReader(content))
 	require.NoError(t, err)
 	var children []oci.Descriptor
@@ -272,7 +272,7 @@ func TestCopyInlineAndExternalContent(t *testing.T) {
 	r := ocimem.NewWithConfig(&ocimem.Config{AllowSparseManifests: true})
 	inline := []byte("embedded")
 	config := oci.Descriptor{MediaType: oci.MediaTypeImageConfig, Digest: ocidigest.FromBytes(inline), Size: int64(len(inline)), Data: inline}
-	layer := oci.Descriptor{MediaType: "application/vnd.oci.image.layer.nondistributable.v1.tar", Digest: ocidigest.FromBytes([]byte("external")), Size: 8, URLs: []string{"https://example.invalid/layer"}}
+	layer := oci.Descriptor{MediaType: oci.MediaTypeImageLayerNonDistributable, Digest: ocidigest.FromBytes([]byte("external")), Size: 8, URLs: []string{"https://example.invalid/layer"}}
 	data, err := json.Marshal(oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageManifest, Config: &config, Layers: []oci.Descriptor{layer}})
 	require.NoError(t, err)
 	_, err = r.PushManifest(t.Context(), "source", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"latest"}})

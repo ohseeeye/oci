@@ -22,18 +22,6 @@ import (
 )
 
 const (
-	// MediaTypeImageIndex specifies the media type for an image index.
-	MediaTypeImageIndex = "application/vnd.oci.image.index.v1+json"
-	// MediaTypeImageManifest specifies the media type for an image manifest.
-	MediaTypeImageManifest = "application/vnd.oci.image.manifest.v1+json"
-	// MediaTypeDockerManifestList is the media type Docker used to use for an index
-	MediaTypeDockerManifestList = "application/vnd.docker.distribution.manifest.list.v2+json"
-	// MediaTypeDockerManifest is the mediat type Docker used to use for a manifest
-	MediaTypeDockerManifest = "application/vnd.docker.distribution.manifest.v2+json"
-
-	// MediaTypeImageConfig specifies the media type for the image configuration.
-	MediaTypeImageConfig = "application/vnd.oci.image.config.v1+json"
-
 	// MaxMediaTypeLen is the maximum allowed length for any mediaType field.
 	MaxMediaTypeLen = 255
 	// MaxArtifactTypeLen is the maximum allowed length for any artifactType field.

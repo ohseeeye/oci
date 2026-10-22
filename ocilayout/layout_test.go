@@ -126,7 +126,7 @@ func TestPushManifestAllowsMissingLayerWithURLs(t *testing.T) {
 
 	config := pushTestBlob(ctx, t, reg, "example/app", []byte("{}"))
 	layer := oci.Descriptor{
-		MediaType: "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip",
+		MediaType: oci.MediaTypeDockerForeignLayerGzip,
 		Digest:    ocidigest.FromBytes([]byte("foreign layer")),
 		Size:      int64(len("foreign layer")),
 		URLs:      []string{"https://example.com/foreign-layer"},
@@ -143,7 +143,7 @@ func TestPushManifestRejectsMissingLayerWithoutURLs(t *testing.T) {
 
 	config := pushTestBlob(ctx, t, reg, "example/app", []byte("{}"))
 	layer := oci.Descriptor{
-		MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+		MediaType: oci.MediaTypeImageLayerGzip,
 		Digest:    ocidigest.FromBytes([]byte("missing layer")),
 		Size:      int64(len("missing layer")),
 	}
