@@ -126,6 +126,20 @@ func TestFindLayoutReturnsReferenceErrors(t *testing.T) {
 	require.ErrorContains(t, err, "path must not be empty")
 }
 
+func TestFindLayoutKeepsRegistryRelativeNames(t *testing.T) {
+	for _, repo := range []string{"ubuntu", "example.com/team/app", "docker.io/ubuntu"} {
+		t.Run(repo, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			require.NoError(t, ensureLayout("."))
+
+			baseDir, ref, err := FindLayout(repo + ":v1")
+			require.NoError(t, err)
+			require.Equal(t, ".", baseDir)
+			requireRef(t, ref, repo, "v1")
+		})
+	}
+}
+
 func requireRef(t *testing.T, ref ociref.Reference, repo, tag string) {
 	t.Helper()
 	require.Empty(t, ref.Host)

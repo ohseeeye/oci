@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package ociref supports parsing cross-registry OCI registry references.
+// Package ociref parses fully qualified and registry-relative OCI references.
+// Parse requires a registry host; ParseRelative treats the entire path as a
+// repository name; ParseRelativeDocker supports Docker-style host inference and
+// Docker Hub defaults.
 package ociref
 
 import (
@@ -104,6 +107,16 @@ var referencePat = sync.OnceValue(func() *regexp.Regexp {
 	)
 })
 
+var relativeReferencePat = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(
+		`^(?:` +
+			`(` + repoName + `)` + // capture 1: repository name, without host inference
+			`(?:` + `:([^@]+))?` + // capture 2: tag
+			`(?:` + `@(.+))?` + // capture 3: digest
+			`)$`,
+	)
+})
+
 var hostPat = sync.OnceValue(func() *regexp.Regexp {
 	return regexp.MustCompile(`^(?:` + domainAndPort + `)$`)
 })
@@ -159,7 +172,7 @@ func IsValidDigest(d string) bool {
 // Parse parses a reference string that must include
 // a host name (or host:port pair) component.
 //
-// It is represented in string form as HOST[:PORT]/NAME[:TAG|@DIGEST]
+// It is represented in string form as HOST[:PORT]/NAME[:TAG][@DIGEST]
 // form: the same syntax accepted by "docker pull".
 // Unlike "docker pull" however, there is no default registry: when
 // presented with a bare repository name, Parse will return an error.
@@ -174,15 +187,29 @@ func Parse(refStr string) (Reference, error) {
 	return ref, nil
 }
 
-// ParseRelative parses a reference string that may
-// or may not include a host name component.
+// ParseRelative parses a registry-relative reference in the form
+// NAME[:TAG][@DIGEST]. The returned Host is always empty, and every path
+// component belongs to Repository, even if it looks like a registry host.
+// No default namespace or tag is added. For example, "example.com/app:v1"
+// has Repository "example.com/app" and Tag "v1".
 //
-// It is represented in string form as [HOST[:PORT]/]NAME[:TAG|@DIGEST]
-// form: the same syntax accepted by "docker pull".
-// Like "docker pull", references without a host default to Docker Hub,
-// and single-component Docker Hub repository names default to the "library"
-// namespace.
+// For the Docker-style normalization previously provided by this function,
+// use [ParseRelativeDocker]. Use [Parse] for a fully qualified reference.
 func ParseRelative(refStr string) (Reference, error) {
+	m := relativeReferencePat().FindStringSubmatch(refStr)
+	if m == nil {
+		return Reference{}, fmt.Errorf("invalid reference syntax (%q)", refStr)
+	}
+	return referenceFromParts(m[1], m[2], m[3])
+}
+
+// ParseRelativeDocker parses a reference in the form
+// [HOST[:PORT]/]NAME[:TAG][@DIGEST], using Docker-style host inference.
+// References without a host default to Docker Hub, Docker Hub host aliases are
+// normalized, and single-component Docker Hub repository names default to the
+// "library" namespace. An omitted tag remains empty; "latest" is not added.
+// This preserves the behavior formerly provided by [ParseRelative].
+func ParseRelativeDocker(refStr string) (Reference, error) {
 	ref, err := parse(refStr)
 	if err != nil {
 		return Reference{}, err
@@ -205,16 +232,24 @@ func parse(refStr string) (Reference, error) {
 	if m == nil {
 		return Reference{}, fmt.Errorf("invalid reference syntax (%q)", refStr)
 	}
-	var ref Reference
-	ref.Host, ref.Repository, ref.Tag = m[1], m[2], m[3]
+	ref, err := referenceFromParts(m[2], m[3], m[4])
+	if err != nil {
+		return Reference{}, err
+	}
+	ref.Host = m[1]
+	return ref, nil
+}
+
+func referenceFromParts(repository, tag, digestStr string) (Reference, error) {
+	ref := Reference{Repository: repository, Tag: tag}
 	// Check lengths and digest: we don't check these as part of the regexp
 	// because it's more efficient to do it in Go and we get
 	// nicer error messages as a result.
-	if m[4] != "" {
+	if digestStr != "" {
 		var err error
-		ref.Digest, err = ocidigest.Parse(m[4])
+		ref.Digest, err = ocidigest.Parse(digestStr)
 		if err != nil {
-			return Reference{}, fmt.Errorf("invalid digest %q: %v", m[4], err)
+			return Reference{}, fmt.Errorf("invalid digest %q: %v", digestStr, err)
 		}
 		if err := ref.Digest.Validate(); err != nil {
 			return Reference{}, fmt.Errorf("invalid digest %q: %v", ref.Digest, err)
@@ -256,7 +291,7 @@ func isWord(c byte) bool {
 
 // String returns the string form of a reference in the form
 //
-//	[HOST/]NAME[:TAG|@DIGEST]
+//	[HOST/]NAME[:TAG][@DIGEST]
 func (ref Reference) String() string {
 	var buf strings.Builder
 	digestString := ref.Digest.String()
