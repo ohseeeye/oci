@@ -141,8 +141,7 @@ func (c *Client) observeManifestETag(resp *http.Response, digest oci.Digest) {
 	}
 }
 
-var _ oci.Registry = (*Client)(nil)
-var _ oci.TagHistory = (*Client)(nil)
+var _ oci.OhSeeEye = (*Client)(nil)
 
 // RequestOptions holds options for [Client.Do].
 type RequestOptions struct {

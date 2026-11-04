@@ -61,8 +61,7 @@ type Registry struct {
 	allowSparseManifests bool
 }
 
-var _ oci.Registry = (*Registry)(nil)
-var _ oci.TagHistory = (*Registry)(nil)
+var _ oci.OhSeeEye = (*Registry)(nil)
 
 // New opens or creates a registry rooted at dir. The directory contains
 // metadata.db, blobs/<algorithm>/<digest>, and uploads/<session>.

@@ -50,7 +50,7 @@ type selectorRegistry struct {
 	selectRegistry func(repo string) oci.Registry
 }
 
-var _ oci.Registry = (*selectorRegistry)(nil)
+var _ oci.OhSeeEye = (*selectorRegistry)(nil)
 
 func (r *selectorRegistry) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {
 	return r.selectRegistry(repo).GetBlob(ctx, repo, digest)
@@ -118,4 +118,8 @@ func (r *selectorRegistry) Tags(ctx context.Context, repo string, params *oci.Ta
 
 func (r *selectorRegistry) Referrers(ctx context.Context, repo string, digest oci.Digest, params *oci.ReferrersParameters) iter.Seq2[oci.Descriptor, error] {
 	return r.selectRegistry(repo).Referrers(ctx, repo, digest, params)
+}
+
+func (r *selectorRegistry) TagHistory(ctx context.Context, repo, tag string, params *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+	return forwardTagHistory(ctx, r.selectRegistry(repo), repo, tag, params)
 }

@@ -68,8 +68,7 @@ type perRepositoryRegistry struct {
 	allowSparseManifests bool
 }
 
-var _ oci.Registry = (*perRepositoryRegistry)(nil)
-var _ oci.TagHistory = (*perRepositoryRegistry)(nil)
+var _ oci.OhSeeEye = (*perRepositoryRegistry)(nil)
 
 type repoLayout struct {
 	raw oci.Registry

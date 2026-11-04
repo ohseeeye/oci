@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// OhSeeEye is the full API implemented by this project's registries and wrappers.
+type OhSeeEye interface {
+	Registry
+	TagHistory
+}
+
 // TagHistory is the proposed tag-history capability. It is independent of
 // Registry so callers can check for this operation with a type assertion
 // without requiring any other experimental API.
@@ -17,6 +23,7 @@ type TagHistory interface {
 	// may still have history; an absent history yields an empty iterator.
 	// A nil params value leaves all filters unspecified. Implementations should
 	// follow the pagination semantics of the proposed tag-history extension.
+	// Unsupported operations yield [ErrUnsupported].
 	TagHistory(ctx context.Context, repo, tag string, params *TagHistoryParameters) iter.Seq2[Descriptor, error]
 }
 

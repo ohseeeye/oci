@@ -62,6 +62,8 @@ type subRegistry struct {
 	r      oci.Registry
 }
 
+var _ oci.OhSeeEye = (*subRegistry)(nil)
+
 func (r *subRegistry) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {
 	ctx = r.mapScopes(ctx)
 	return r.r.GetBlob(ctx, r.repo(repo), digest)
@@ -164,6 +166,11 @@ func (r *subRegistry) Tags(ctx context.Context, repo string, params *oci.TagsPar
 func (r *subRegistry) Referrers(ctx context.Context, repo string, digest oci.Digest, params *oci.ReferrersParameters) iter.Seq2[oci.Descriptor, error] {
 	ctx = r.mapScopes(ctx)
 	return r.r.Referrers(ctx, r.repo(repo), digest, params)
+}
+
+func (r *subRegistry) TagHistory(ctx context.Context, repo, tag string, params *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+	ctx = r.mapScopes(ctx)
+	return forwardTagHistory(ctx, r.r, r.repo(repo), tag, params)
 }
 
 // mapScopes changes any auth scopes in the context so that

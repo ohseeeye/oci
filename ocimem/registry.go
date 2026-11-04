@@ -24,8 +24,7 @@ import (
 	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
-var _ oci.Registry = (*Registry)(nil)
-var _ oci.TagHistory = (*Registry)(nil)
+var _ oci.OhSeeEye = (*Registry)(nil)
 
 // Registry is an in-memory implementation of [oci.Registry] and [oci.TagHistory].
 type Registry struct {
