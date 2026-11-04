@@ -229,6 +229,8 @@ func TestTagHistoryBackendErrors(t *testing.T) {
 		{oci.ErrNameUnknown, http.StatusOK},
 		{oci.ErrManifestUnknown, http.StatusOK},
 		{oci.ErrUnsupported, http.StatusNotFound},
+		{fmt.Errorf("history: %w", oci.ErrUnauthorized), http.StatusUnauthorized},
+		{fmt.Errorf("history: %w", oci.ErrDenied), http.StatusForbidden},
 		{errors.New("failure"), http.StatusInternalServerError},
 	} {
 		backend.list = func(context.Context, string, string, *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {

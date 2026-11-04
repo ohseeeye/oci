@@ -82,6 +82,12 @@ func (s *Server) tagHistoryGet(history oci.TagHistory) http.HandlerFunc {
 			case errors.Is(err, oci.ErrUnsupported):
 				http.NotFound(w, r)
 				return
+			case errors.Is(err, oci.ErrUnauthorized):
+				returnError(w, ErrUnauthorized())
+				return
+			case errors.Is(err, oci.ErrDenied):
+				returnError(w, ErrDenied("tag history access denied"))
+				return
 			default:
 				s.logError(r.Context(), "listing tag history", err, "repository", repo, "tag", tag)
 				returnError(w, ErrServerError())

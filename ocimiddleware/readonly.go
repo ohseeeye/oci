@@ -14,23 +14,38 @@
 
 package ocimiddleware
 
-import "github.com/ohseeeye/oci"
+import (
+	"context"
+	"iter"
+
+	"github.com/ohseeeye/oci"
+)
 
 // ReadOnly returns a registry implementation that returns
 // an "operation unsupported" error from all entry points that
 // mutate the registry.
 func ReadOnly(r oci.Registry) oci.Registry {
-	// One level deeper so the Reader and Lister values take precedence,
-	// following Go's shallower-method-wins rules.
-	type deeper struct {
-		*oci.Funcs
-	}
-	return struct {
-		oci.Reader
-		oci.Lister
-		deeper
-	}{
+	return &readOnlyRegistry{
 		Reader: r,
 		Lister: r,
+		r:      r,
 	}
+}
+
+type readOnlyRegistry struct {
+	oci.Reader
+	oci.Lister
+	readOnlyUnsupported
+	r oci.Registry
+}
+
+// Keep unsupported defaults below Reader and Lister in method promotion.
+type readOnlyUnsupported struct {
+	*oci.Funcs
+}
+
+var _ oci.OhSeeEye = (*readOnlyRegistry)(nil)
+
+func (r *readOnlyRegistry) TagHistory(ctx context.Context, repo, tag string, params *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+	return forwardTagHistory(ctx, r.r, repo, tag, params)
 }

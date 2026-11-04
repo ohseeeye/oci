@@ -35,7 +35,7 @@ const (
 	// AccessDelete represents [oci.Deleter] methods.
 	AccessDelete
 
-	// AccessList represents [oci.Lister] methods.
+	// AccessList represents [oci.Lister] and [oci.TagHistory] methods.
 	AccessList
 )
 
@@ -65,6 +65,8 @@ type accessCheckerRegistry struct {
 	check func(repoName string, kind AccessKind) error
 	r     oci.Registry
 }
+
+var _ oci.OhSeeEye = (*accessCheckerRegistry)(nil)
 
 func (r *accessCheckerRegistry) GetBlob(ctx context.Context, repo string, digest oci.Digest) (oci.BlobReader, error) {
 	if err := r.check(repo, AccessRead); err != nil {
@@ -206,4 +208,11 @@ func (r *accessCheckerRegistry) Referrers(ctx context.Context, repo string, dige
 		return oci.ErrorSeq[oci.Descriptor](err)
 	}
 	return r.r.Referrers(ctx, repo, digest, params)
+}
+
+func (r *accessCheckerRegistry) TagHistory(ctx context.Context, repo, tag string, params *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+	if err := r.check(repo, AccessList); err != nil {
+		return oci.ErrorSeq[oci.Descriptor](err)
+	}
+	return forwardTagHistory(ctx, r.r, repo, tag, params)
 }

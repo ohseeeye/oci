@@ -63,6 +63,8 @@ type unifier struct {
 	*oci.Funcs
 }
 
+var _ oci.OhSeeEye = unifier{}
+
 func bothResults[T result[T]](r0, r1 T) T {
 	if r0.error() == nil && r1.error() == nil {
 		return r0

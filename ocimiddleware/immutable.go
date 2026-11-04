@@ -17,6 +17,7 @@ package ocimiddleware
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/ohseeeye/oci"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
@@ -31,6 +32,12 @@ func Immutable(r oci.Registry) oci.Registry {
 
 type immutable struct {
 	oci.Registry
+}
+
+var _ oci.OhSeeEye = immutable{}
+
+func (r immutable) TagHistory(ctx context.Context, repo, tag string, params *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+	return forwardTagHistory(ctx, r.Registry, repo, tag, params)
 }
 
 func (r immutable) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {

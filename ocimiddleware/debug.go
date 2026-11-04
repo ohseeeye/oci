@@ -45,6 +45,8 @@ type logger struct {
 	*oci.Funcs
 }
 
+var _ oci.OhSeeEye = (*logger)(nil)
+
 func (r *logger) DeleteBlob(ctx context.Context, repoName string, digest oci.Digest) error {
 	r.logf("DeleteBlob %s %s {", repoName, digest)
 	err := r.r.DeleteBlob(ctx, repoName, digest)
@@ -178,6 +180,14 @@ func (r *logger) Tags(ctx context.Context, repoName string, params *oci.TagsPara
 		r,
 		fmt.Sprintf("Tags %s startAfter: %q limit: %d", repoName, startAfter, limit),
 		r.r.Tags(ctx, repoName, params),
+	)
+}
+
+func (r *logger) TagHistory(ctx context.Context, repo, tag string, params *oci.TagHistoryParameters) iter.Seq2[oci.Descriptor, error] {
+	return logIterReturn(
+		r,
+		fmt.Sprintf("TagHistory %s %s params=%+v", repo, tag, params),
+		forwardTagHistory(ctx, r.r, repo, tag, params),
 	)
 }
 

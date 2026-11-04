@@ -55,8 +55,7 @@ type Registry struct {
 	state *layoutState
 }
 
-var _ oci.Registry = (*Registry)(nil)
-var _ oci.TagHistory = (*Registry)(nil)
+var _ oci.OhSeeEye = (*Registry)(nil)
 
 type layoutState struct {
 	dir   string
