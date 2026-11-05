@@ -66,15 +66,15 @@ func (r *Registry) MountBlob(ctx context.Context, fromRepo, toRepo string, diges
 // may be dangling and layers with external URLs need not be stored locally.
 // IfMatch checks one tag's quoted digest inside the write transaction before
 // publishing content. A mismatch returns oci.ErrManifestInvalid.
-func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	if err := ctx.Err(); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	if !ociref.IsValidRepository(repo) || len(repo) > 255 {
-		return oci.Descriptor{}, oci.ErrNameInvalid
+		return oci.TaggedDescriptor{}, oci.ErrNameInvalid
 	}
 	if mediaType == "" || len(mediaType) > oci.MaxMediaTypeLen {
-		return oci.Descriptor{}, oci.ErrManifestInvalid
+		return oci.TaggedDescriptor{}, oci.ErrManifestInvalid
 	}
 	// Own the content while validating, publishing, and deriving metadata.
 	data = slices.Clone(data)
@@ -84,7 +84,7 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	if params != nil {
 		ifMatch = params.IfMatch
 		if ifMatch != "" && len(params.Tags) != 1 {
-			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+			return oci.TaggedDescriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
 		}
 		tags = slices.Compact(slices.Sorted(slices.Values(params.Tags)))
 		if params.Digest != "" {
@@ -93,17 +93,17 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	}
 	for _, tag := range tags {
 		if !ociref.IsValidTag(tag) {
-			return oci.Descriptor{}, oci.ErrNameInvalid
+			return oci.TaggedDescriptor{}, oci.ErrNameInvalid
 		}
 	}
 	info, err := manifestInfoFromBytes(mediaType, data)
 	if err != nil {
-		return oci.Descriptor{}, fmt.Errorf("%w: %v", oci.ErrManifestInvalid, err)
+		return oci.TaggedDescriptor{}, fmt.Errorf("%w: %v", oci.ErrManifestInvalid, err)
 	}
 	desc := oci.Descriptor{Digest: digest, Size: int64(len(data)), MediaType: mediaType}
 	if ifMatch == "" {
 		if _, err := writeBlob(ctx, r.dir, desc, bytes.NewReader(data)); err != nil {
-			return oci.Descriptor{}, err
+			return oci.TaggedDescriptor{}, err
 		}
 	}
 	err = r.withConn(ctx, true, func(conn *sqlite.Conn) error {
@@ -187,7 +187,7 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 		return nil
 	})
 	if err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
-	return desc, nil
+	return oci.TaggedDescriptor{Descriptor: desc, Tags: tags}, nil
 }

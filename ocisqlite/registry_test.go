@@ -76,7 +76,7 @@ func TestSharedContentAndPersistence(t *testing.T) {
 	r = newRegistry(t, dir)
 	got, err := r.ResolveTag(t.Context(), "example/app", "latest")
 	require.NoError(t, err)
-	require.Equal(t, desc, got)
+	require.Equal(t, desc.Descriptor, got)
 	br, err := r.GetTag(t.Context(), "example/app", "latest")
 	require.Equal(t, data, readContent(t, br, err))
 	br, err = r.GetManifest(t.Context(), "example/app", desc.Digest)
@@ -239,7 +239,9 @@ func TestManifestReferencesAndReferrers(t *testing.T) {
 	require.ErrorIs(t, err, oci.ErrNameUnknown, "failed writes must roll back repository creation")
 	child, err := r.PushManifest(t.Context(), "source", data, m.MediaType, nil)
 	require.NoError(t, err)
-	index := oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex, Manifests: []oci.Descriptor{child}}
+	require.Empty(t, child.Tags)
+	require.Equal(t, oci.Descriptor{Digest: ocidigest.FromBytes(data), Size: int64(len(data)), MediaType: m.MediaType}, child.Descriptor)
+	index := oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex, Manifests: []oci.Descriptor{child.Descriptor}}
 	idx, err := r.PushManifest(t.Context(), "source", manifestBytes(t, index), index.MediaType, nil)
 	require.NoError(t, err)
 	require.ErrorIs(t, r.DeleteManifest(t.Context(), "source", child.Digest), oci.ErrDenied)
@@ -341,7 +343,7 @@ func TestMigrateSparseSchema(t *testing.T) {
 	data := manifestBytes(t, oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageManifest, Config: &blob, Layers: []oci.Descriptor{}})
 	child, err := r.PushManifest(t.Context(), "app", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"child"}})
 	require.NoError(t, err)
-	index := manifestBytes(t, oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex, Manifests: []oci.Descriptor{child}, Annotations: map[string]string{"example": "preserved"}})
+	index := manifestBytes(t, oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex, Manifests: []oci.Descriptor{child.Descriptor}, Annotations: map[string]string{"example": "preserved"}})
 	parent, err := r.PushManifest(t.Context(), "app", index, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}})
 	require.NoError(t, err)
 	// Recreate the original child constraints with existing relationships, then

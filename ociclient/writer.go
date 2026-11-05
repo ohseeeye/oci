@@ -17,10 +17,12 @@ package ociclient
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,14 +31,15 @@ import (
 
 	"github.com/ohseeeye/oci/pkg/ociauth"
 	"github.com/ohseeeye/oci/pkg/ocidigest"
+	"github.com/ohseeeye/oci/pkg/ociref"
 )
 
 // PushManifest pushes a manifest with the given media type and contents.
 // It sends params.IfMatch only after SupportsIfMatch reports true; before
 // discovery the condition is omitted and the push is unconditional.
-func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	if mediaType == "" {
-		return oci.Descriptor{}, fmt.Errorf("PushManifest called with empty mediaType")
+		return oci.TaggedDescriptor{}, fmt.Errorf("PushManifest called with empty mediaType")
 	}
 	var dig oci.Digest
 	if params != nil && params.Digest != "" {
@@ -44,11 +47,11 @@ func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte,
 	} else {
 		dig = ocidigest.FromBytes(contents)
 	}
-	desc := oci.Descriptor{
+	result := oci.TaggedDescriptor{Descriptor: oci.Descriptor{
 		Digest:    dig,
 		Size:      int64(len(contents)),
 		MediaType: mediaType,
-	}
+	}}
 
 	var tags []string
 	if params != nil {
@@ -56,58 +59,69 @@ func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte,
 	}
 	if params != nil && params.IfMatch != "" && c.SupportsIfMatch() {
 		if len(tags) != 1 {
-			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+			return result, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
 		}
-		// A conditional update targets the tag itself. Never fall back to an
-		// unconditional or bulk push when the precondition fails.
-		_, err := c.putManifest(ctx, repo, tags[0], nil, desc, contents, params.IfMatch)
-		return desc, err
+		return c.putManifest(ctx, repo, tags[0], nil, result, contents, params.IfMatch)
 	}
 
-	// If there are no tags, push once by digest.
-	// If there are tags, push once per tag (all referencing the same contents).
-	if len(tags) == 0 {
-		_, err := c.putManifest(ctx, repo, desc.Digest.String(), nil, desc, contents, "")
-		return desc, err
-	} else {
-		createdTags, err := c.putManifest(ctx, repo, desc.Digest.String(), tags, desc, contents, "")
-		if err != nil || len(createdTags) != len(tags) {
-			// bulk send failed, fallback to sending one at a time
-			for _, tag := range tags {
-				_, err = c.putManifest(ctx, repo, tag, nil, desc, contents, "")
-				if err != nil {
-					return oci.Descriptor{}, fmt.Errorf("creating tag %s failed: %w", tag, err)
-				}
-			}
+	result, err := c.putManifest(ctx, repo, result.Digest.String(), tags, result, contents, "")
+	if err != nil {
+		return result, err
+	}
+	for _, tag := range tags {
+		if slices.Contains(result.Tags, tag) {
+			continue
+		}
+		result, err = c.putManifest(ctx, repo, tag, nil, result, contents, "")
+		if err != nil {
+			return result, fmt.Errorf("creating tag %s failed: %w", tag, err)
 		}
 	}
-	return desc, nil
+	return result, nil
 }
 
-func (c *Client) putManifest(ctx context.Context, repo string, tagOrDigest string, tags []string, desc oci.Descriptor, contents []byte, ifMatch string) ([]string, error) {
+func (c *Client) putManifest(ctx context.Context, repo string, tagOrDigest string, tags []string, result oci.TaggedDescriptor, contents []byte, ifMatch string) (oci.TaggedDescriptor, error) {
 	u := manifestURLWithTags(repo, tagOrDigest, tags)
 	req, err := newRequest(ctx, http.MethodPut, u, bytes.NewReader(contents), pushScope(repo))
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-	req.Header.Set("Content-Type", desc.MediaType)
+	req.Header.Set("Content-Type", result.MediaType)
 	if ifMatch != "" {
 		req.Header.Set("If-Match", ifMatch)
 	}
-	req.ContentLength = desc.Size
-	resp, err := c.do(req, http.StatusCreated)
+	req.ContentLength = result.Size
+	resp, err := c.Do(req, nil)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	responseErr := CheckResponse(resp, http.StatusCreated)
 
-	var createdTags []string
-	if vs := resp.Header.Values("OCI-Tag"); len(vs) > 0 {
-		for _, v := range vs {
-			createdTags = append(createdTags, strings.Split(v, ",")...)
+	if header := resp.Header.Get("Docker-Content-Digest"); header != "" {
+		dig, err := ocidigest.Parse(header)
+		if err != nil {
+			return result, errors.Join(responseErr, fmt.Errorf("bad digest %q found in response: %w", header, err))
+		}
+		if len(result.Tags) > 0 && dig != result.Digest {
+			return result, errors.Join(responseErr, fmt.Errorf("manifest digest changed from %s to %s", result.Digest, dig))
+		}
+		result.Digest = dig
+	}
+	confirmTag := func(tag string) {
+		if ociref.IsValidTag(tag) && !slices.Contains(result.Tags, tag) {
+			result.Tags = append(result.Tags, tag)
 		}
 	}
-	return createdTags, nil
+	for _, value := range resp.Header.Values("OCI-Tag") {
+		for _, tag := range strings.Split(value, ",") {
+			confirmTag(strings.TrimSpace(tag))
+		}
+	}
+	if responseErr == nil {
+		confirmTag(tagOrDigest)
+	}
+	return result, responseErr
 }
 
 func manifestURLWithTags(repo string, tagOrDigest string, tags []string) string {

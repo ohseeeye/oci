@@ -148,9 +148,9 @@ func (r *accessCheckerRegistry) MountBlob(ctx context.Context, fromRepo, toRepo 
 	return r.r.MountBlob(ctx, fromRepo, toRepo, digest)
 }
 
-func (r *accessCheckerRegistry) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *accessCheckerRegistry) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	if err := r.check(repo, AccessWrite); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	return r.r.PushManifest(ctx, repo, contents, mediaType, params)
 }

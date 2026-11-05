@@ -40,7 +40,7 @@ func (r immutable) TagHistory(ctx context.Context, repo, tag string, params *oci
 	return forwardTagHistory(ctx, r.Registry, repo, tag, params)
 }
 
-func (r immutable) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r immutable) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	var tags []string
 	if params != nil {
 		tags = params.Tags
@@ -61,27 +61,27 @@ func (r immutable) PushManifest(ctx context.Context, repo string, contents []byt
 				// We're trying to push exactly the same content. That's OK.
 				continue
 			}
-			return oci.Descriptor{}, fmt.Errorf("this store is immutable: %w", oci.ErrDenied)
+			return oci.TaggedDescriptor{}, fmt.Errorf("this store is immutable: %w", oci.ErrDenied)
 		}
 	}
-	desc, err := r.Registry.PushManifest(ctx, repo, contents, mediaType, params)
+	result, err := r.Registry.PushManifest(ctx, repo, contents, mediaType, params)
 	if err != nil {
-		return oci.Descriptor{}, err
+		return result, err
 	}
 	// We've pushed the tags but someone else might also have pushed them at the same time.
 	// UNFORTUNATELY if there was a race, then there's a small window in time where
 	// some client might have seen the tag change underfoot.
-	for _, tag := range tags {
+	for _, tag := range result.Tags {
 		tagDesc, err := r.ResolveTag(ctx, repo, tag)
 		if err != nil {
-			return oci.Descriptor{}, fmt.Errorf("cannot resolve tag %q that's just been pushed: %v", tag, err)
+			return result, fmt.Errorf("cannot resolve tag %q that's just been pushed: %w", tag, err)
 		}
 		if tagDesc.Digest != dig {
 			// We lost the race.
-			return oci.Descriptor{}, fmt.Errorf("this store is immutable: %w", oci.ErrDenied)
+			return result, fmt.Errorf("this store is immutable: %w", oci.ErrDenied)
 		}
 	}
-	return desc, nil
+	return result, nil
 }
 
 func (r immutable) DeleteBlob(ctx context.Context, repo string, digest oci.Digest) error {

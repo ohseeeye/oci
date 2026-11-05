@@ -2,6 +2,7 @@ package ociclient
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -53,6 +54,230 @@ func TestCopyImage(t *testing.T) {
 	require.Equal(t, testDigest, desc.Digest)
 	require.Equal(t, oci.MediaTypeImageManifest, desc.MediaType)
 	require.Zero(t, desc.Size)
+}
+
+func manifestPushResponse(req *http.Request, status int, digest oci.Digest, tags ...string) *http.Response {
+	header := make(http.Header)
+	if digest != "" {
+		header.Set("Docker-Content-Digest", digest.String())
+	}
+	for _, tag := range tags {
+		header.Add("OCI-Tag", tag)
+	}
+	return &http.Response{
+		StatusCode: status,
+		Status:     strconv.Itoa(status) + " " + http.StatusText(status),
+		Header:     header,
+		Body:       http.NoBody,
+		Request:    req,
+	}
+}
+
+func TestPushManifestDigestOnlyUsesServerDigest(t *testing.T) {
+	data := []byte("manifest")
+	serverDigest := ocidigest.FromBytes([]byte("server representation"))
+	calls := 0
+	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		require.Equal(t, "/v2/repo/manifests/"+ocidigest.FromBytes(data).String(), req.URL.Path)
+		require.Empty(t, req.URL.RawQuery)
+		return manifestPushResponse(req, http.StatusCreated, serverDigest), nil
+	})})
+	require.NoError(t, err)
+
+	result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Empty(t, result.Tags)
+	require.Equal(t, oci.Descriptor{Digest: serverDigest, Size: int64(len(data)), MediaType: oci.MediaTypeImageManifest}, result.Descriptor)
+}
+
+func TestPushManifestRetriesOnlyUnconfirmedTags(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		tags       []string
+		headers    []string
+		missingTag string
+		wantTags   []string
+	}{
+		{
+			name:       "partial repeated acknowledgements",
+			tags:       []string{"first", "second", "third", "third"},
+			headers:    []string{" first, second , first ", "second, , invalid/tag"},
+			missingTag: "third",
+			wantTags:   []string{"first", "second", "third"},
+		},
+		{
+			name:       "equal count wrong acknowledgements",
+			tags:       []string{"first", "second"},
+			headers:    []string{"first, other"},
+			missingTag: "second",
+			wantTags:   []string{"first", "other", "second"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := []byte("manifest")
+			serverDigest := ocidigest.FromBytes([]byte("server representation"))
+			var paths []string
+			client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+				paths = append(paths, req.URL.Path)
+				require.Equal(t, http.MethodPut, req.Method)
+				if len(paths) == 1 {
+					require.Equal(t, test.tags, req.URL.Query()["tag"])
+					return manifestPushResponse(req, http.StatusCreated, serverDigest, test.headers...), nil
+				}
+				require.Equal(t, "/v2/repo/manifests/"+test.missingTag, req.URL.Path)
+				require.Empty(t, req.URL.RawQuery)
+				return manifestPushResponse(req, http.StatusCreated, ""), nil
+			})})
+			require.NoError(t, err)
+
+			result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: test.tags})
+			require.NoError(t, err)
+			require.Equal(t, []string{"/v2/repo/manifests/" + ocidigest.FromBytes(data).String(), "/v2/repo/manifests/" + test.missingTag}, paths)
+			require.ElementsMatch(t, test.wantTags, result.Tags)
+			require.Equal(t, oci.Descriptor{Digest: serverDigest, Size: int64(len(data)), MediaType: oci.MediaTypeImageManifest}, result.Descriptor)
+		})
+	}
+}
+
+func TestPushManifestKeepsTagsBeforeIndividualFailure(t *testing.T) {
+	data := []byte("manifest")
+	serverDigest := ocidigest.FromBytes([]byte("server representation"))
+	var paths []string
+	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		switch len(paths) {
+		case 1:
+			return manifestPushResponse(req, http.StatusCreated, serverDigest), nil
+		case 2:
+			return manifestPushResponse(req, http.StatusCreated, ""), nil
+		default:
+			return manifestPushResponse(req, http.StatusForbidden, "", " extra, first, invalid/tag, ", "extra"), nil
+		}
+	})})
+	require.NoError(t, err)
+
+	result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"first", "second", "third"}})
+	require.ErrorContains(t, err, "creating tag second failed")
+	require.Equal(t, []string{"/v2/repo/manifests/" + ocidigest.FromBytes(data).String(), "/v2/repo/manifests/first", "/v2/repo/manifests/second"}, paths)
+	require.ElementsMatch(t, []string{"first", "extra"}, result.Tags)
+	require.Equal(t, oci.Descriptor{Digest: serverDigest, Size: int64(len(data)), MediaType: oci.MediaTypeImageManifest}, result.Descriptor)
+}
+
+func TestPushManifestBulkErrorDoesNotRetry(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusBadRequest} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			data := []byte("manifest")
+			serverDigest := ocidigest.FromBytes([]byte("server representation"))
+			calls := 0
+			client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				return manifestPushResponse(req, status, serverDigest, " first, first, invalid/tag, ", "first"), nil
+			})})
+			require.NoError(t, err)
+
+			result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"first", "second"}})
+			require.Error(t, err)
+			require.Equal(t, 1, calls)
+			require.Equal(t, []string{"first"}, result.Tags)
+			require.Equal(t, oci.Descriptor{Digest: serverDigest, Size: int64(len(data)), MediaType: oci.MediaTypeImageManifest}, result.Descriptor)
+		})
+	}
+}
+
+func TestPushManifestTransportFailureKeepsOnlyConfirmedTags(t *testing.T) {
+	data := []byte("manifest")
+	transportErr := errors.New("connection lost before response")
+	for _, tc := range []struct {
+		name     string
+		failAt   int
+		wantTags []string
+	}{{"bulk", 1, nil}, {"after partial acknowledgement", 2, []string{"first"}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if calls < tc.failAt {
+					return manifestPushResponse(req, http.StatusCreated, "", "first"), nil
+				}
+				return nil, transportErr
+			})})
+			require.NoError(t, err)
+
+			result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"first", "second"}})
+			require.ErrorIs(t, err, transportErr)
+			require.Equal(t, tc.failAt, calls)
+			require.ElementsMatch(t, tc.wantTags, result.Tags)
+			require.Equal(t, oci.Descriptor{Digest: ocidigest.FromBytes(data), Size: int64(len(data)), MediaType: oci.MediaTypeImageManifest}, result.Descriptor)
+		})
+	}
+}
+
+func TestPushManifestRejectsInconsistentTagDigests(t *testing.T) {
+	data := []byte("manifest")
+	firstDigest := ocidigest.FromBytes([]byte("first representation"))
+	calls := 0
+	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return manifestPushResponse(req, http.StatusCreated, firstDigest, "first"), nil
+		}
+		return manifestPushResponse(req, http.StatusCreated, ocidigest.FromBytes([]byte("other representation")), "second"), nil
+	})})
+	require.NoError(t, err)
+
+	result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"first", "second", "third"}})
+	require.ErrorContains(t, err, "manifest digest changed")
+	require.Equal(t, 2, calls)
+	require.Equal(t, []string{"first"}, result.Tags)
+	require.Equal(t, firstDigest, result.Digest)
+}
+
+func TestConditionalManifestPushConfirmsURLTag(t *testing.T) {
+	calls := 0
+	serverDigest := ocidigest.FromBytes([]byte("server representation"))
+	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodHead {
+			resp := manifestPushResponse(req, http.StatusOK, serverDigest)
+			resp.Header.Set("ETag", strconv.Quote(serverDigest.String()))
+			return resp, nil
+		}
+		calls++
+		require.Equal(t, "/v2/repo/manifests/latest", req.URL.Path)
+		require.Empty(t, req.URL.RawQuery)
+		require.Equal(t, `"previous"`, req.Header.Get("If-Match"))
+		return manifestPushResponse(req, http.StatusCreated, serverDigest), nil
+	})})
+	require.NoError(t, err)
+	_, err = client.ResolveTag(t.Context(), "repo", "latest")
+	require.NoError(t, err)
+
+	result, err := client.PushManifest(t.Context(), "repo", []byte("manifest"), oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: `"previous"`})
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, []string{"latest"}, result.Tags)
+	require.Equal(t, serverDigest, result.Digest)
+}
+
+func TestPushManifestPartialResultOverHTTP(t *testing.T) {
+	data := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}`)
+	want := oci.TaggedDescriptor{
+		Descriptor: oci.Descriptor{Digest: ocidigest.FromBytes(data), Size: int64(len(data)), MediaType: oci.MediaTypeImageIndex},
+		Tags:       []string{"created"},
+	}
+	backend := &oci.Funcs{PushManifest_: func(context.Context, string, []byte, string, *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
+		return want, oci.ErrDenied
+	}}
+	server, err := ociserver.New(backend, nil)
+	require.NoError(t, err)
+	srv := httptest.NewServer(server)
+	t.Cleanup(srv.Close)
+	client := newManifestTestClient(t, srv)
+
+	got, err := client.PushManifest(t.Context(), "app", data, want.MediaType, &oci.PushManifestParameters{Tags: []string{"created", "missing"}})
+	require.ErrorIs(t, err, oci.ErrDenied)
+	require.Equal(t, want, got)
 }
 
 func newManifestTestClient(t *testing.T, srv *httptest.Server) *Client {
@@ -186,8 +411,10 @@ func TestConditionalManifestPushNoFallback(t *testing.T) {
 	client := newManifestTestClient(t, srv)
 	_, err := client.ResolveTag(t.Context(), "example/app", "latest")
 	require.NoError(t, err)
-	_, err = client.PushManifest(t.Context(), "example/app", []byte("data"), oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: `"previous"`})
+	result, err := client.PushManifest(t.Context(), "example/app", []byte("data"), oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: `"previous"`})
 	require.ErrorIs(t, err, oci.ErrManifestInvalid)
+	require.Empty(t, result.Tags)
+	require.Equal(t, oci.Descriptor{Digest: ocidigest.FromBytes([]byte("data")), Size: 4, MediaType: oci.MediaTypeImageIndex}, result.Descriptor)
 	require.EqualValues(t, 1, calls.Load(), "a conditional failure must not retry without the condition")
 	got := <-requests
 	require.Equal(t, request{http.MethodPut, "/v2/example/app/manifests/latest", "", `"previous"`}, got)

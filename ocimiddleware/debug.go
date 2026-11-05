@@ -138,15 +138,11 @@ func (r *logger) PushBlobChunkedResume(ctx context.Context, repoName, id string,
 	}, err
 }
 
-func (r *logger) PushManifest(ctx context.Context, repoName string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *logger) PushManifest(ctx context.Context, repoName string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	r.logf("PushManifest %s params=%+v mediaType=%q data=%q {", repoName, params, mediaType, data)
-	desc, err := r.r.PushManifest(ctx, repoName, data, mediaType, params)
-	if err != nil {
-		r.logf("} -> %v", err)
-	} else {
-		r.logf("} -> %#v", desc)
-	}
-	return desc, err
+	result, err := r.r.PushManifest(ctx, repoName, data, mediaType, params)
+	r.logf("} -> %#v, %v", result, err)
+	return result, err
 }
 
 func (r *logger) Referrers(ctx context.Context, repoName string, digest oci.Digest, params *oci.ReferrersParameters) iter.Seq2[oci.Descriptor, error] {

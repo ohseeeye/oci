@@ -84,6 +84,9 @@ func TestSharedLayoutUntaggedManifest(t *testing.T) {
 	layer := pushTestBlob(ctx, t, reg, "example/app", []byte("layer"))
 	desc, err := reg.PushManifest(ctx, "example/app", testManifest(t, config, layer), oci.MediaTypeImageManifest, nil)
 	require.NoError(t, err)
+	require.Empty(t, desc.Tags)
+	require.Equal(t, oci.MediaTypeImageManifest, desc.MediaType)
+	require.Positive(t, desc.Size)
 
 	got, err := reg.ResolveManifest(ctx, "example/app", desc.Digest)
 	require.NoError(t, err)

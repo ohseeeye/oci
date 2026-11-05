@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -199,12 +200,111 @@ func TestManifestIfMatch(t *testing.T) {
 	require.Equal(t, http.StatusCreated, conditionalPut(t, srv, target, conditionIndex).Code)
 }
 
+func TestManifestPutReportsConfirmedResult(t *testing.T) {
+	t.Parallel()
+
+	desc := oci.Descriptor{
+		Digest:    ocidigest.FromBytes([]byte("stored manifest")),
+		MediaType: oci.MediaTypeImageIndex,
+		Size:      int64(len(conditionIndex)),
+	}
+	partial := oci.TaggedDescriptor{Descriptor: desc, Tags: []string{"stable"}}
+	for _, test := range []struct {
+		name       string
+		result     oci.TaggedDescriptor
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "success confirms subset",
+			result:     partial,
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "success confirms no tags",
+			result:     oci.TaggedDescriptor{Descriptor: desc},
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "partial result with wrapped invalid manifest",
+			result:     partial,
+			err:        fmt.Errorf("assign tags: %w", oci.ErrManifestInvalid),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "MANIFEST_INVALID",
+		},
+		{
+			name:       "partial result with wrapped denial",
+			result:     partial,
+			err:        fmt.Errorf("assign tags: %w", oci.ErrDenied),
+			wantStatus: http.StatusForbidden,
+			wantCode:   "DENIED",
+		},
+		{
+			name:       "partial result with wrapped unauthorized",
+			result:     partial,
+			err:        fmt.Errorf("assign tags: %w", oci.ErrUnauthorized),
+			wantStatus: http.StatusUnauthorized,
+			wantCode:   "UNAUTHORIZED",
+		},
+		{
+			name:       "failure with no result",
+			err:        oci.ErrManifestInvalid,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "MANIFEST_INVALID",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			srv, err := New(&oci.Funcs{PushManifest_: func(_ context.Context, _ string, _ []byte, _ string, p *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
+				require.Equal(t, []string{"stable", "preview", "latest"}, p.Tags)
+				return test.result, test.err
+			}}, nil)
+			require.NoError(t, err)
+			target := "/v2/example/manifests/latest?tag=stable&tag=preview"
+			rec := conditionalPut(t, srv, target, conditionIndex)
+			response := rec.Result()
+			require.Equal(t, test.wantStatus, response.StatusCode, rec.Body.String())
+			require.Equal(t, test.result.Tags, response.Header.Values("OCI-Tag"))
+			require.Equal(t, test.result.Descriptor.Digest.String(), response.Header.Get("Docker-Content-Digest"))
+			if test.err == nil {
+				require.Equal(t, strconv.Quote(desc.Digest.String()), response.Header.Get("ETag"))
+				require.Equal(t, "/v2/example/manifests/latest", response.Header.Get("Location"))
+			} else {
+				var wire oci.WireErrors
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &wire))
+				require.Len(t, wire.Errors, 1)
+				require.Equal(t, test.wantCode, wire.Errors[0].Code())
+				require.Empty(t, response.Header.Get("ETag"))
+				require.Empty(t, response.Header.Get("Location"))
+			}
+		})
+	}
+}
+
+func TestManifestPutRejectsUnsafeResultHeaders(t *testing.T) {
+	t.Parallel()
+
+	srv, err := New(&oci.Funcs{PushManifest_: func(context.Context, string, []byte, string, *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
+		return oci.TaggedDescriptor{
+			Descriptor: oci.Descriptor{Digest: "sha256:bad\r\nInjected: value"},
+			Tags:       []string{"stable", "bad\r\nInjected: value", ""},
+		}, nil
+	}}, nil)
+	require.NoError(t, err)
+	rec := conditionalPut(t, srv, "/v2/example/manifests/latest", conditionIndex)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	require.Equal(t, []string{"stable"}, rec.Result().Header.Values("OCI-Tag"))
+	require.Empty(t, rec.Result().Header.Get("Docker-Content-Digest"))
+	require.Empty(t, rec.Result().Header.Get("ETag"))
+}
+
 func TestManifestIfMatchPassesThrough(t *testing.T) {
 	var got *oci.PushManifestParameters
-	srv, err := New(&oci.Funcs{PushManifest_: func(_ context.Context, _ string, _ []byte, _ string, p *oci.PushManifestParameters) (oci.Descriptor, error) {
+	srv, err := New(&oci.Funcs{PushManifest_: func(_ context.Context, _ string, _ []byte, _ string, p *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 		captured := *p
 		got = &captured
-		return oci.Descriptor{}, nil
+		return oci.TaggedDescriptor{}, nil
 	}}, nil)
 	require.NoError(t, err)
 	condition := `"sha256:previous"`

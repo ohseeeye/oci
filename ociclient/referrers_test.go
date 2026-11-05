@@ -116,7 +116,7 @@ func pushManifest(t *testing.T, client oci.Registry, repo, tag string, content a
 	}
 	desc, err := client.PushManifest(context.Background(), repo, data, mediaType, params)
 	require.NoError(t, err)
-	return desc
+	return desc.Descriptor
 }
 
 func mustNewOCIClient(srvURL string, opts *ociclient.Options) oci.Registry {

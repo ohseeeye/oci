@@ -122,7 +122,7 @@ func (r *subRegistry) MountBlob(ctx context.Context, fromRepo, toRepo string, di
 	return r.r.MountBlob(ctx, r.repo(fromRepo), r.repo(toRepo), digest)
 }
 
-func (r *subRegistry) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *subRegistry) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	ctx = r.mapScopes(ctx)
 	return r.r.PushManifest(ctx, r.repo(repo), contents, mediaType, params)
 }

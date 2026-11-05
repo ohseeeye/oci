@@ -175,10 +175,10 @@ func (r *perRepositoryRegistry) MountBlob(ctx context.Context, fromRepo, toRepo 
 	return r.PushBlob(ctx, toRepo, desc, br)
 }
 
-func (r *perRepositoryRegistry) PushManifest(ctx context.Context, repo string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *perRepositoryRegistry) PushManifest(ctx context.Context, repo string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	layout, err := r.layoutForRepo(repo)
 	if err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	return layout.PushManifest(ctx, ".", data, mediaType, params)
 }
