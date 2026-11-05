@@ -37,6 +37,7 @@ import (
 // PushManifest pushes a manifest with the given media type and contents.
 // It sends params.IfMatch only after SupportsIfMatch reports true; before
 // discovery the condition is omitted and the push is unconditional.
+// The result uses the server's digest when provided, otherwise the requested or computed digest.
 func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	if mediaType == "" {
 		return oci.TaggedDescriptor{}, fmt.Errorf("PushManifest called with empty mediaType")
@@ -61,15 +62,26 @@ func (c *Client) PushManifest(ctx context.Context, repo string, contents []byte,
 		if len(tags) != 1 {
 			return result, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
 		}
+		// A conditional update targets the tag itself. Never fall back to an
+		// unconditional or bulk push when the precondition fails.
 		return c.putManifest(ctx, repo, tags[0], nil, result, contents, params.IfMatch)
 	}
 
+	// Push by digest first, asking for all destination tags in the same request.
+	// Registries may ignore query tags; OCI-Tag identifies confirmed assignments.
 	result, err := c.putManifest(ctx, repo, result.Digest.String(), tags, result, contents, "")
-	if err != nil {
-		return result, err
+	bulkFailed := err != nil
+	if bulkFailed {
+		// HTTP 400 may mean bulk tagging is unsupported; retry each tag individually.
+		// Other errors are not compatibility signals and must retain their partial result.
+		var httpErr oci.HTTPError
+		if len(tags) == 0 || !errors.As(err, &httpErr) || httpErr.StatusCode() != http.StatusBadRequest {
+			return result, err
+		}
 	}
 	for _, tag := range tags {
-		if slices.Contains(result.Tags, tag) {
+		// Only a successful bulk request lets us skip already-confirmed tags.
+		if !bulkFailed && slices.Contains(result.Tags, tag) {
 			continue
 		}
 		result, err = c.putManifest(ctx, repo, tag, nil, result, contents, "")
@@ -91,6 +103,7 @@ func (c *Client) putManifest(ctx context.Context, repo string, tagOrDigest strin
 		req.Header.Set("If-Match", ifMatch)
 	}
 	req.ContentLength = result.Size
+	// Unlike c.do, keep error response headers so partial assignments are not lost.
 	resp, err := c.Do(req, nil)
 	if err != nil {
 		return result, err
@@ -98,13 +111,11 @@ func (c *Client) putManifest(ctx context.Context, repo string, tagOrDigest strin
 	defer resp.Body.Close()
 	responseErr := CheckResponse(resp, http.StatusCreated)
 
+	// Report the registry's digest without requiring the same algorithm across responses.
 	if header := resp.Header.Get("Docker-Content-Digest"); header != "" {
 		dig, err := ocidigest.Parse(header)
 		if err != nil {
 			return result, errors.Join(responseErr, fmt.Errorf("bad digest %q found in response: %w", header, err))
-		}
-		if len(result.Tags) > 0 && dig != result.Digest {
-			return result, errors.Join(responseErr, fmt.Errorf("manifest digest changed from %s to %s", result.Digest, dig))
 		}
 		result.Digest = dig
 	}
@@ -119,6 +130,7 @@ func (c *Client) putManifest(ctx context.Context, repo string, tagOrDigest strin
 		}
 	}
 	if responseErr == nil {
+		// A successful tag-addressed PUT confirms its URL tag even without OCI-Tag.
 		confirmTag(tagOrDigest)
 	}
 	return result, responseErr

@@ -75,7 +75,7 @@ func manifestPushResponse(req *http.Request, status int, digest oci.Digest, tags
 
 func TestPushManifestDigestOnlyUsesServerDigest(t *testing.T) {
 	data := []byte("manifest")
-	serverDigest := ocidigest.FromBytes([]byte("server representation"))
+	serverDigest := ocidigest.SHA512.FromBytes(data)
 	calls := 0
 	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
@@ -117,7 +117,7 @@ func TestPushManifestRetriesOnlyUnconfirmedTags(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			data := []byte("manifest")
-			serverDigest := ocidigest.FromBytes([]byte("server representation"))
+			serverDigest := ocidigest.SHA512.FromBytes(data)
 			var paths []string
 			client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 				paths = append(paths, req.URL.Path)
@@ -143,7 +143,7 @@ func TestPushManifestRetriesOnlyUnconfirmedTags(t *testing.T) {
 
 func TestPushManifestKeepsTagsBeforeIndividualFailure(t *testing.T) {
 	data := []byte("manifest")
-	serverDigest := ocidigest.FromBytes([]byte("server representation"))
+	serverDigest := ocidigest.SHA512.FromBytes(data)
 	var paths []string
 	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 		paths = append(paths, req.URL.Path)
@@ -165,11 +165,11 @@ func TestPushManifestKeepsTagsBeforeIndividualFailure(t *testing.T) {
 	require.Equal(t, oci.Descriptor{Digest: serverDigest, Size: int64(len(data)), MediaType: oci.MediaTypeImageManifest}, result.Descriptor)
 }
 
-func TestPushManifestBulkErrorDoesNotRetry(t *testing.T) {
-	for _, status := range []int{http.StatusForbidden, http.StatusBadRequest} {
+func TestPushManifestOtherBulkErrorsDoNotRetry(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			data := []byte("manifest")
-			serverDigest := ocidigest.FromBytes([]byte("server representation"))
+			serverDigest := ocidigest.SHA512.FromBytes(data)
 			calls := 0
 			client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 				calls++
@@ -184,6 +184,58 @@ func TestPushManifestBulkErrorDoesNotRetry(t *testing.T) {
 			require.Equal(t, oci.Descriptor{Digest: serverDigest, Size: int64(len(data)), MediaType: oci.MediaTypeImageManifest}, result.Descriptor)
 		})
 	}
+}
+
+func TestPushManifestBadRequestFallsBackToIndividualTags(t *testing.T) {
+	data := []byte("manifest")
+	digest := ocidigest.FromBytes(data)
+	for _, lastStatus := range []int{http.StatusCreated, http.StatusForbidden} {
+		t.Run(http.StatusText(lastStatus), func(t *testing.T) {
+			var paths []string
+			client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+				paths = append(paths, req.URL.Path)
+				if len(req.URL.Query()["tag"]) > 0 {
+					return manifestPushResponse(req, http.StatusBadRequest, ""), nil
+				}
+				status := http.StatusCreated
+				if strings.HasSuffix(req.URL.Path, "/second") {
+					status = lastStatus
+				}
+				response := manifestPushResponse(req, status, digest)
+				if status == http.StatusForbidden {
+					response.Header.Set("Content-Type", "application/json")
+					response.Body = io.NopCloser(strings.NewReader(`{"errors":[{"code":"DENIED","message":"tag access denied"}]}`))
+				}
+				return response, nil
+			})})
+			require.NoError(t, err)
+
+			result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"first", "second"}})
+			if lastStatus == http.StatusCreated {
+				require.NoError(t, err)
+				require.Equal(t, []string{"first", "second"}, result.Tags)
+			} else {
+				require.ErrorIs(t, err, oci.ErrDenied)
+				require.Equal(t, []string{"first"}, result.Tags)
+			}
+			require.Equal(t, digest, result.Digest)
+			require.Equal(t, []string{"/v2/repo/manifests/" + digest.String(), "/v2/repo/manifests/first", "/v2/repo/manifests/second"}, paths)
+		})
+	}
+}
+
+func TestPushManifestDigestOnlyBadRequestDoesNotRetry(t *testing.T) {
+	calls := 0
+	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return manifestPushResponse(req, http.StatusBadRequest, ""), nil
+	})})
+	require.NoError(t, err)
+
+	result, err := client.PushManifest(t.Context(), "repo", []byte("manifest"), oci.MediaTypeImageManifest, nil)
+	require.Error(t, err)
+	require.Empty(t, result.Tags)
+	require.Equal(t, 1, calls)
 }
 
 func TestPushManifestTransportFailureKeepsOnlyConfirmedTags(t *testing.T) {
@@ -214,29 +266,31 @@ func TestPushManifestTransportFailureKeepsOnlyConfirmedTags(t *testing.T) {
 	}
 }
 
-func TestPushManifestRejectsInconsistentTagDigests(t *testing.T) {
+func TestPushManifestReturnsLatestServerDigest(t *testing.T) {
 	data := []byte("manifest")
-	firstDigest := ocidigest.FromBytes([]byte("first representation"))
+	firstDigest := ocidigest.SHA256.FromBytes(data)
+	lastDigest := ocidigest.SHA512.FromBytes(data)
 	calls := 0
 	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
 		if calls == 1 {
 			return manifestPushResponse(req, http.StatusCreated, firstDigest, "first"), nil
 		}
-		return manifestPushResponse(req, http.StatusCreated, ocidigest.FromBytes([]byte("other representation")), "second"), nil
+		return manifestPushResponse(req, http.StatusCreated, lastDigest, "second"), nil
 	})})
 	require.NoError(t, err)
 
-	result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"first", "second", "third"}})
-	require.ErrorContains(t, err, "manifest digest changed")
+	result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"first", "second"}})
+	require.NoError(t, err)
 	require.Equal(t, 2, calls)
-	require.Equal(t, []string{"first"}, result.Tags)
-	require.Equal(t, firstDigest, result.Digest)
+	require.Equal(t, []string{"first", "second"}, result.Tags)
+	require.Equal(t, lastDigest, result.Digest)
 }
 
 func TestConditionalManifestPushConfirmsURLTag(t *testing.T) {
+	data := []byte("manifest")
 	calls := 0
-	serverDigest := ocidigest.FromBytes([]byte("server representation"))
+	serverDigest := ocidigest.SHA512.FromBytes(data)
 	client, err := New("registry.example", &Options{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 		if req.Method == http.MethodHead {
 			resp := manifestPushResponse(req, http.StatusOK, serverDigest)
@@ -253,7 +307,7 @@ func TestConditionalManifestPushConfirmsURLTag(t *testing.T) {
 	_, err = client.ResolveTag(t.Context(), "repo", "latest")
 	require.NoError(t, err)
 
-	result, err := client.PushManifest(t.Context(), "repo", []byte("manifest"), oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: `"previous"`})
+	result, err := client.PushManifest(t.Context(), "repo", data, oci.MediaTypeImageManifest, &oci.PushManifestParameters{Tags: []string{"latest"}, IfMatch: `"previous"`})
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 	require.Equal(t, []string{"latest"}, result.Tags)
