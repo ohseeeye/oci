@@ -266,7 +266,7 @@ func TestManifestPutReportsConfirmedResult(t *testing.T) {
 			response := rec.Result()
 			require.Equal(t, test.wantStatus, response.StatusCode, rec.Body.String())
 			require.Equal(t, test.result.Tags, response.Header.Values("OCI-Tag"))
-			require.Equal(t, test.result.Descriptor.Digest.String(), response.Header.Get("Docker-Content-Digest"))
+			require.Equal(t, test.result.Digest.String(), response.Header.Get("Docker-Content-Digest"))
 			if test.err == nil {
 				require.Equal(t, strconv.Quote(desc.Digest.String()), response.Header.Get("ETag"))
 				require.Equal(t, "/v2/example/manifests/latest", response.Header.Get("Location"))

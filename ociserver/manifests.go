@@ -247,7 +247,7 @@ func (s *Server) manifestPut() http.HandlerFunc {
 			IfMatch: ifMatch,
 		}
 		result, err := s.db.PushManifest(r.Context(), name, b, contentType, params)
-		if digest := result.Descriptor.Digest.String(); digest != "" && !strings.ContainsAny(digest, "\r\n") {
+		if digest := result.Digest.String(); digest != "" && !strings.ContainsAny(digest, "\r\n") {
 			w.Header().Set("Docker-Content-Digest", digest)
 			if err == nil {
 				w.Header().Set("ETag", strconv.Quote(digest))
