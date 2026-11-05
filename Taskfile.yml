@@ -14,6 +14,12 @@ tasks:
     cmds:
       - go test ./...
       - task: test:ocisqlite
+      - task: test:ocis3
+
+  test:ocis3:
+    desc: Run the S3 module tests
+    dir: '{{.ROOT_DIR}}/ocis3'
+    cmd: go test ./...
 
   test:ocisqlite:
     desc: Run the SQLite module tests
@@ -24,7 +30,7 @@ tasks:
     desc: Run golangci-lint inside a Docker container
     dir: .
     cmds:
-      - for: [".", "ocisqlite"]
+      - for: [".", "ocisqlite", "ocis3"]
         cmd: >-
           docker run --rm
           -v {{.ROOT_DIR}}:/workspace
@@ -38,7 +44,7 @@ tasks:
     desc: Run golangci-lint with auto-fix inside a Docker container
     dir: .
     cmds:
-      - for: [".", "ocisqlite"]
+      - for: [".", "ocisqlite", "ocis3"]
         cmd: >-
           docker run --rm
           -v {{.ROOT_DIR}}:/workspace
@@ -62,6 +68,14 @@ tasks:
     cmds:
       - go test -tags=integration ./ocimem ./ocilayout -run TestOCIConformance -count=1 -v
       - task: conformance:ocisqlite
+      - task: conformance:ocis3
+
+  conformance:ocis3:
+    desc: Run S3 integration and OCI distribution conformance tests against MinIO
+    dir: '{{.ROOT_DIR}}/ocis3'
+    env:
+      OCI_CONFORMANCE_RESULTS: '{{.ROOT_DIR}}/results'
+    cmd: go test -tags=integration ./... -run 'TestS3Integration|TestOCIConformance' -count=1 -v
 
   conformance:ocimem:
     desc: Run OCI distribution conformance tests against ocimem
