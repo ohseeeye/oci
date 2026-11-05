@@ -198,8 +198,9 @@ type Writer interface {
 
 	// PushManifest pushes a manifest with the given media type and contents.
 	//
-	// It returns a descriptor suitable for accessing the manfiest.
-	PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *PushManifestParameters) (Descriptor, error)
+	// The result includes unique confirmed tag assignments, even on partial failure.
+	// An error with no confirmed tags does not imply the destination was unchanged.
+	PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *PushManifestParameters) (TaggedDescriptor, error)
 }
 
 // Deleter defines registry actions that delete objects from the registry.

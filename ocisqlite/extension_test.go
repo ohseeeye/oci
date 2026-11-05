@@ -16,7 +16,7 @@ func pushTaggedIndex(t *testing.T, r *Registry, repo, tag, version string) oci.D
 	data := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[],"annotations":{"version":%q}}`, oci.MediaTypeImageIndex, version))
 	desc, err := r.PushManifest(t.Context(), repo, data, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{tag}})
 	require.NoError(t, err)
-	return desc
+	return desc.Descriptor
 }
 
 func historyTime(t *testing.T, desc oci.Descriptor) time.Time {
@@ -114,8 +114,9 @@ func TestTagHistoryTransactionAndPersistence(t *testing.T) {
 		return execute(conn, `CREATE TRIGGER reject_history BEFORE INSERT ON tag_history BEGIN SELECT RAISE(ABORT, 'injected history failure'); END`)
 	}))
 	data := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[],"annotations":{"version":"second"}}`, oci.MediaTypeImageIndex))
-	_, err = r.PushManifest(t.Context(), "example", data, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest", "v2"}})
+	result, err := r.PushManifest(t.Context(), "example", data, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{"latest", "v2"}})
 	require.ErrorContains(t, err, "injected history failure")
+	require.Empty(t, result.Tags)
 	got, err := r.ResolveTag(t.Context(), "example", "latest")
 	require.NoError(t, err)
 	require.Equal(t, first, got)

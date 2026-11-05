@@ -51,7 +51,7 @@ type Funcs struct {
 	PushBlobChunked_       func(ctx context.Context, repo string, chunkSize int) (BlobWriter, error)
 	PushBlobChunkedResume_ func(ctx context.Context, repo, id string, offset int64, chunkSize int) (BlobWriter, error)
 	MountBlob_             func(ctx context.Context, fromRepo, toRepo string, digest Digest) (Descriptor, error)
-	PushManifest_          func(ctx context.Context, repo string, contents []byte, mediaType string, params *PushManifestParameters) (Descriptor, error)
+	PushManifest_          func(ctx context.Context, repo string, contents []byte, mediaType string, params *PushManifestParameters) (TaggedDescriptor, error)
 	DeleteBlob_            func(ctx context.Context, repo string, digest Digest) error
 	DeleteManifest_        func(ctx context.Context, repo string, digest Digest) error
 	DeleteTag_             func(ctx context.Context, repo string, name string) error
@@ -159,11 +159,11 @@ func (f *Funcs) MountBlob(ctx context.Context, fromRepo, toRepo string, digest D
 }
 
 // PushManifest implements [Registry.PushManifest] by calling f.PushManifest_.
-func (f *Funcs) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *PushManifestParameters) (Descriptor, error) {
+func (f *Funcs) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *PushManifestParameters) (TaggedDescriptor, error) {
 	if f != nil && f.PushManifest_ != nil {
 		return f.PushManifest_(ctx, repo, contents, mediaType, params)
 	}
-	return Descriptor{}, f.newError(ctx, "PushManifest", repo)
+	return TaggedDescriptor{}, f.newError(ctx, "PushManifest", repo)
 }
 
 // DeleteBlob implements [Registry.DeleteBlob] by calling f.DeleteBlob_.

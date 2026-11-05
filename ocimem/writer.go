@@ -101,47 +101,47 @@ func (r *Registry) MountBlob(ctx context.Context, fromRepo, toRepo string, dig o
 var errCannotOverwriteTag = fmt.Errorf("%w: cannot overwrite tag", oci.ErrDenied)
 
 // PushManifest pushes a manifest to the named repository, optionally tagging it.
-func (r *Registry) PushManifest(ctx context.Context, repoName string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *Registry) PushManifest(ctx context.Context, repoName string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if params != nil && params.IfMatch != "" {
 		if len(params.Tags) != 1 {
-			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+			return oci.TaggedDescriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
 		}
 		if !ociref.IsValidRepository(repoName) || !ociref.IsValidTag(params.Tags[0]) {
-			return oci.Descriptor{}, oci.ErrNameInvalid
+			return oci.TaggedDescriptor{}, oci.ErrNameInvalid
 		}
 		var current oci.Digest
 		if repo := r.repos[repoName]; repo != nil {
 			current = repo.tags[params.Tags[0]].Digest
 		}
 		if current == "" || params.IfMatch != strconv.Quote(current.String()) {
-			return oci.Descriptor{}, fmt.Errorf("%w: If-Match does not match the current tag digest", oci.ErrManifestInvalid)
+			return oci.TaggedDescriptor{}, fmt.Errorf("%w: If-Match does not match the current tag digest", oci.ErrManifestInvalid)
 		}
 	}
 	repo, err := r.makeRepo(repoName)
 	if err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	var dig oci.Digest
 	if params != nil && params.Digest != "" {
 		// Validate the provided digest against the contents.
 		if err := params.Digest.Validate(); err != nil {
-			return oci.Descriptor{}, fmt.Errorf("invalid digest: %v: %w", err, oci.ErrDigestInvalid)
+			return oci.TaggedDescriptor{}, fmt.Errorf("invalid digest: %v: %w", err, oci.ErrDigestInvalid)
 		}
 		w, err := ocidigest.NewWriter(nil, params.Digest.Algorithm())
 		if err != nil {
-			return oci.Descriptor{}, fmt.Errorf("cannot make digest writer: %v", err)
+			return oci.TaggedDescriptor{}, fmt.Errorf("cannot make digest writer: %v", err)
 		}
 		if _, err := w.Write(data); err != nil {
-			return oci.Descriptor{}, fmt.Errorf("cannot verify digest: %v", err)
+			return oci.TaggedDescriptor{}, fmt.Errorf("cannot verify digest: %v", err)
 		}
 		got, err := w.Digest()
 		if err != nil {
-			return oci.Descriptor{}, fmt.Errorf("cannot verify digest: %v", err)
+			return oci.TaggedDescriptor{}, fmt.Errorf("cannot verify digest: %v", err)
 		}
 		if got != params.Digest {
-			return oci.Descriptor{}, fmt.Errorf("digest mismatch: %w", oci.ErrDigestInvalid)
+			return oci.TaggedDescriptor{}, fmt.Errorf("digest mismatch: %w", oci.ErrDigestInvalid)
 		}
 		dig = params.Digest
 	} else {
@@ -156,23 +156,23 @@ func (r *Registry) PushManifest(ctx context.Context, repoName string, data []byt
 	if params != nil {
 		tags = params.Tags
 	}
+	var tagsToUpdate []string
 	for _, tag := range tags {
 		if !ociref.IsValidTag(tag) {
-			return oci.Descriptor{}, fmt.Errorf("invalid tag")
+			return oci.TaggedDescriptor{}, fmt.Errorf("invalid tag")
 		}
 		if r.cfg.ImmutableTags {
 			if currDesc, ok := repo.tags[tag]; ok {
 				if dig == currDesc.Digest {
 					if currDesc.MediaType != mediaType {
-						// Same digest but mismatched media type.
-						return oci.Descriptor{}, fmt.Errorf("%w: mismatched media type", oci.ErrDenied)
+						return oci.TaggedDescriptor{}, fmt.Errorf("%w: mismatched media type", oci.ErrDenied)
 					}
-					// It's got the same content already. Allow it.
-					return currDesc, nil
+					continue
 				}
-				return oci.Descriptor{}, errCannotOverwriteTag
+				return oci.TaggedDescriptor{}, errCannotOverwriteTag
 			}
 		}
+		tagsToUpdate = append(tagsToUpdate, tag)
 	}
 	// make a copy of the data to avoid potential corruption.
 	data = slices.Clone(data)
@@ -180,18 +180,18 @@ func (r *Registry) PushManifest(ctx context.Context, repoName string, data []byt
 		// Only check descriptor with data when using canonical digest,
 		// since CheckDescriptor uses canonical hashing.
 		if err := CheckDescriptor(desc, data); err != nil {
-			return oci.Descriptor{}, fmt.Errorf("invalid descriptor: %v", err)
+			return oci.TaggedDescriptor{}, fmt.Errorf("invalid descriptor: %v", err)
 		}
 	} else {
 		// For non-canonical digests, check descriptor without data verification
 		// (we already validated the digest above).
 		if desc.MediaType == "" {
-			return oci.Descriptor{}, fmt.Errorf("invalid descriptor: no media type in descriptor")
+			return oci.TaggedDescriptor{}, fmt.Errorf("invalid descriptor: no media type in descriptor")
 		}
 	}
 	info, err := r.checkManifestReferences(repoName, desc.MediaType, data)
 	if err != nil {
-		return oci.Descriptor{}, fmt.Errorf("invalid manifest: %v", err)
+		return oci.TaggedDescriptor{}, fmt.Errorf("invalid manifest: %v", err)
 	}
 
 	repo.manifests[dig] = &blob{
@@ -200,11 +200,11 @@ func (r *Registry) PushManifest(ctx context.Context, repoName string, data []byt
 		data:      data,
 		info:      info,
 	}
-	for _, tag := range tags {
+	for _, tag := range tagsToUpdate {
 		repo.tags[tag] = desc
 		repo.recordTagEvent(tag, desc, oci.TagHistoryEventCreated)
 	}
-	return desc, nil
+	return oci.TaggedDescriptor{Descriptor: desc, Tags: slices.Compact(slices.Sorted(slices.Values(tags)))}, nil
 }
 
 func (r *Registry) checkManifestReferences(repoName string, mediaType string, data []byte) (manifestInfo, error) {

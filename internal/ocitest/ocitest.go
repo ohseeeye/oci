@@ -329,7 +329,7 @@ func (r Registry) MustPushManifest(repo string, jsonObject any, tag string) ([]b
 	require.Equal(r.T, desc.Digest, desc1.Digest)
 	require.Equal(r.T, desc.Size, desc1.Size)
 	require.Equal(r.T, desc.MediaType, desc1.MediaType)
-	return data, desc1
+	return data, desc1.Descriptor
 }
 
 // Repo holds the information needed to interact with a specific repository

@@ -60,6 +60,12 @@ type Descriptor struct {
 	ArtifactType string `json:"artifactType,omitempty"`
 }
 
+// TaggedDescriptor describes content and the tag assignments confirmed by an operation.
+type TaggedDescriptor struct {
+	Descriptor
+	Tags []string
+}
+
 // Platform describes the platform which the image in the manifest runs on.
 type Platform struct {
 	// Architecture field specifies the CPU architecture, for example amd64 or ppc64le.

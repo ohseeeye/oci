@@ -42,7 +42,7 @@ func makeCopyFixture(t *testing.T) copyFixture {
 		desc, err := r.PushManifest(t.Context(), "source", data, oci.MediaTypeImageManifest, nil)
 		require.NoError(t, err)
 		desc.Platform = &oci.Platform{OS: "linux", Architecture: arch}
-		children = append(children, desc)
+		children = append(children, desc.Descriptor)
 	}
 	data, err := json.Marshal(oci.IndexOrManifest{SchemaVersion: 2, MediaType: oci.MediaTypeImageIndex, Manifests: children})
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func makeCopyFixture(t *testing.T) copyFixture {
 	digest := ocidigest.SHA512.FromBytes(data)
 	root, err := r.PushManifest(t.Context(), "source", data, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Digest: digest, Tags: []string{"latest", "v1"}})
 	require.NoError(t, err)
-	return copyFixture{r, root, layer, children, data}
+	return copyFixture{r, root.Descriptor, layer, children, data}
 }
 
 type observedCopySource struct {
@@ -212,8 +212,8 @@ func TestCopyReferrers(t *testing.T) {
 			require.NoError(t, err)
 			ref, err := f.registry.PushManifest(t.Context(), "source", data, oci.MediaTypeImageManifest, nil)
 			require.NoError(t, err)
-			refs = append(refs, ref)
-			subject = ref
+			refs = append(refs, ref.Descriptor)
+			subject = ref.Descriptor
 		}
 		dst := ocimem.New()
 		_, err := Copy(t.Context(), f.registry, "source", "latest", dst, "destination", &CopyOptions{IncludeReferrers: include})

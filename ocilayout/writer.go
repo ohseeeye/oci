@@ -126,18 +126,18 @@ func (r *Registry) MountBlob(ctx context.Context, fromRepo, toRepo string, dig o
 }
 
 // PushManifest pushes a manifest to the named repository, optionally tagging it.
-func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	if err := contextErr(ctx); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	if mediaType == "" {
-		return oci.Descriptor{}, fmt.Errorf("%w: empty media type", oci.ErrManifestInvalid)
+		return oci.TaggedDescriptor{}, fmt.Errorf("%w: empty media type", oci.ErrManifestInvalid)
 	}
 	var dig oci.Digest
 	if params != nil && params.Digest != "" {
 		dig = params.Digest
 		if err := verifyBytesDigest(data, dig); err != nil {
-			return oci.Descriptor{}, err
+			return oci.TaggedDescriptor{}, err
 		}
 	} else {
 		dig = ocidigest.FromBytes(data)
@@ -153,7 +153,7 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	}
 	for _, tag := range tags {
 		if !ociref.IsValidTag(tag) {
-			return oci.Descriptor{}, fmt.Errorf("%w: invalid tag %q", oci.ErrNameInvalid, tag)
+			return oci.TaggedDescriptor{}, fmt.Errorf("%w: invalid tag %q", oci.ErrNameInvalid, tag)
 		}
 	}
 
@@ -161,38 +161,38 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 	defer r.mu.Unlock()
 	if params != nil && params.IfMatch != "" {
 		if len(tags) != 1 {
-			return oci.Descriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
+			return oci.TaggedDescriptor{}, fmt.Errorf("%w: If-Match requires exactly one tag", oci.ErrManifestInvalid)
 		}
 		currentState, err := r.layoutForRepoLocked(repo, false)
 		if err != nil {
-			return oci.Descriptor{}, err
+			return oci.TaggedDescriptor{}, err
 		}
 		current, err := r.tagDescriptor(currentState, repo, tags[0])
 		if err != nil && !errors.Is(err, oci.ErrManifestUnknown) && !errors.Is(err, oci.ErrNameUnknown) {
-			return oci.Descriptor{}, err
+			return oci.TaggedDescriptor{}, err
 		}
 		if current.Digest == "" || params.IfMatch != strconv.Quote(current.Digest.String()) {
-			return oci.Descriptor{}, fmt.Errorf("%w: If-Match does not match the current tag digest", oci.ErrManifestInvalid)
+			return oci.TaggedDescriptor{}, fmt.Errorf("%w: If-Match does not match the current tag digest", oci.ErrManifestInvalid)
 		}
 	}
 	st, err := r.layoutForRepoLocked(repo, true)
 	if err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	if err := r.checkManifestReferences(st, repo, mediaType, data); err != nil {
-		return oci.Descriptor{}, fmt.Errorf("%w: %v", oci.ErrManifestInvalid, err)
+		return oci.TaggedDescriptor{}, fmt.Errorf("%w: %v", oci.ErrManifestInvalid, err)
 	}
 	if _, err := writeBlobBytes(st.dir, desc, data); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	// Update references and history together in the single index.json write.
 	next := *st
 	next.index.Manifests = slices.Clone(st.index.Manifests)
 	if err := setEvicted(&next.index, repo, "manifest", desc.Digest, false); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	if err := setEvicted(&next.index, repo, "blob", desc.Digest, false); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	if len(tags) == 0 {
 		r.upsertManifestRef(&next, repo, "", desc)
@@ -202,13 +202,13 @@ func (r *Registry) PushManifest(ctx context.Context, repo string, data []byte, m
 		}
 	}
 	if err := recordTagHistory(&next.index, repo, tags, desc, oci.TagHistoryEventCreated); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	if err := saveIndex(st.dir, next.index); err != nil {
-		return oci.Descriptor{}, err
+		return oci.TaggedDescriptor{}, err
 	}
 	st.index = next.index
-	return desc, nil
+	return oci.TaggedDescriptor{Descriptor: desc, Tags: slices.Compact(slices.Sorted(slices.Values(tags)))}, nil
 }
 
 func (r *Registry) checkManifestReferences(st *layoutState, repo, mediaType string, data []byte) error {

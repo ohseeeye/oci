@@ -405,7 +405,7 @@ func TestNonCanonicalPushManifest(t *testing.T) {
 		Tags:   []string{"sha512"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, manifestDesc, desc)
+	require.Equal(t, manifestDesc, desc.Descriptor)
 	storedManifestDesc := manifestDesc
 	storedManifestDesc.ArtifactType = configDesc.MediaType
 

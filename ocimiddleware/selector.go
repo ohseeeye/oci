@@ -96,7 +96,7 @@ func (r *selectorRegistry) MountBlob(ctx context.Context, fromRepo, toRepo strin
 	return r.selectRegistry(toRepo).MountBlob(ctx, fromRepo, toRepo, digest)
 }
 
-func (r *selectorRegistry) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.Descriptor, error) {
+func (r *selectorRegistry) PushManifest(ctx context.Context, repo string, contents []byte, mediaType string, params *oci.PushManifestParameters) (oci.TaggedDescriptor, error) {
 	return r.selectRegistry(repo).PushManifest(ctx, repo, contents, mediaType, params)
 }
 

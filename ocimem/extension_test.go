@@ -16,7 +16,7 @@ func pushTaggedIndex(t *testing.T, r *Registry, repo, tag, version string) oci.D
 	data := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[],"annotations":{"version":%q}}`, oci.MediaTypeImageIndex, version))
 	desc, err := r.PushManifest(t.Context(), repo, data, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{tag}})
 	require.NoError(t, err)
-	return desc
+	return desc.Descriptor
 }
 
 func historyTime(t *testing.T, desc oci.Descriptor) time.Time {

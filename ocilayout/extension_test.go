@@ -15,7 +15,7 @@ func pushHistoryIndex(t *testing.T, r oci.Registry, repo, tag, version string) o
 	data := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[],"annotations":{"version":%q}}`, oci.MediaTypeImageIndex, version))
 	desc, err := r.PushManifest(t.Context(), repo, data, oci.MediaTypeImageIndex, &oci.PushManifestParameters{Tags: []string{tag}})
 	require.NoError(t, err)
-	return desc
+	return desc.Descriptor
 }
 
 func layoutHistory(t *testing.T, r oci.Registry, repo, tag string, params *oci.TagHistoryParameters) []oci.Descriptor {

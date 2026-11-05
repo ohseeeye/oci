@@ -246,9 +246,28 @@ func (s *Server) manifestPut() http.HandlerFunc {
 			Tags:    tags,
 			IfMatch: ifMatch,
 		}
-		_, err = s.db.PushManifest(r.Context(), name, b, contentType, params)
+		result, err := s.db.PushManifest(r.Context(), name, b, contentType, params)
+		if digest := result.Digest.String(); digest != "" && !strings.ContainsAny(digest, "\r\n") {
+			w.Header().Set("Docker-Content-Digest", digest)
+			if err == nil {
+				w.Header().Set("ETag", strconv.Quote(digest))
+			}
+		}
+		for _, tag := range result.Tags {
+			if ociref.IsValidTag(tag) {
+				w.Header().Add("OCI-Tag", tag)
+			}
+		}
 		if err != nil {
 			if returnAuthError(w, r, err) {
+				return
+			}
+			if errors.Is(err, oci.ErrUnauthorized) {
+				returnError(w, ErrUnauthorized())
+				return
+			}
+			if errors.Is(err, oci.ErrDenied) {
+				returnError(w, ErrDenied("manifest push access denied"))
 				return
 			}
 			if errors.Is(err, oci.ErrManifestBlobUnknown) {
@@ -274,14 +293,6 @@ func (s *Server) manifestPut() http.HandlerFunc {
 		}
 		u := fmt.Sprintf("/v2/%s/manifests/%s", name, reference)
 		w.Header().Set("Location", u)
-		w.Header().Set("Docker-Content-Digest", dgst.String())
-		w.Header().Set("ETag", strconv.Quote(dgst.String()))
-		for _, t := range tags {
-			if strings.ContainsAny(t, "\r\n") {
-				continue
-			}
-			w.Header().Add("OCI-Tag", t)
-		}
 		w.WriteHeader(http.StatusCreated)
 	}
 }

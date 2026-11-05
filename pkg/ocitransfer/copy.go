@@ -224,11 +224,11 @@ func (c *copier) copy(ctx context.Context, root oci.Descriptor, tags []string) (
 			if !copyMissing(err) && !errors.Is(err, oci.ErrUnsupported) {
 				return oci.Descriptor{}, err
 			}
-			got, err = c.destination.PushManifest(ctx, c.destinationRepo, manifest.data, manifest.desc.MediaType, &oci.PushManifestParameters{Digest: manifest.desc.Digest})
+			result, err := c.destination.PushManifest(ctx, c.destinationRepo, manifest.data, manifest.desc.MediaType, &oci.PushManifestParameters{Digest: manifest.desc.Digest})
 			if err != nil {
 				return oci.Descriptor{}, fmt.Errorf("pushing manifest %s: %w", manifest.desc.Digest, err)
 			}
-			if err := matchingDescriptor(manifest.desc, got); err != nil {
+			if err := matchingDescriptor(manifest.desc, result.Descriptor); err != nil {
 				return oci.Descriptor{}, err
 			}
 		}
@@ -254,7 +254,7 @@ func (c *copier) copy(ctx context.Context, root oci.Descriptor, tags []string) (
 		if err != nil {
 			return oci.Descriptor{}, fmt.Errorf("assigning destination tags: %w", err)
 		}
-		if err := matchingDescriptor(root, got); err != nil {
+		if err := matchingDescriptor(root, got.Descriptor); err != nil {
 			return oci.Descriptor{}, err
 		}
 	}
